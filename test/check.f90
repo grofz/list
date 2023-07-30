@@ -11,9 +11,11 @@ subroutine test1()
   use dllnode_mod
   implicit none
 
-  type(dllnode_t), pointer :: head, head1, deleted, next_in_chain, found
+  type(dllnode_t), pointer :: head, head1, deleted, next_in_chain, &
+      found, head_b, head_c
   integer :: i
   integer, parameter :: MAXN = 10
+  integer(DATA_KIND), allocatable :: data(:,:)
 
   ! Working with an empty list
   head => null()
@@ -53,7 +55,7 @@ subroutine test1()
         dllnode_find(head,int([i,i],DATA_KIND)),&
         deleted,next_in_chain)
     if (associated(deleted, head)) head => next_in_chain
-    if (associated(deleted)) deallocate(deleted)
+    if (associated(deleted)) call dllnode_free(deleted)
     print '("After removing ",i0," remains = ",*(i0,1x))', i,dllnode_export(head)
   end do
 
@@ -63,4 +65,34 @@ subroutine test1()
   found => dllnode_find(head,int([9,9],DATA_KIND))
   if (associated(found)) found => found%goprev()
   print '("Before [9] is ",L)', associated(found)
+
+  ! Test import and copy
+  print *
+  data = dllnode_export(head)
+  head_b => dllnode_t(data) ! dllnode_import
+  print '("HeadB export = ",*(i0,1x))', dllnode_export(head_b)
+  
+  print *
+  found => dllnode_find(head, int([5,5],DATA_KIND))
+  !head_c =>  dllnode_t(found) ! dllnode_copy
+  head_c =>  dllnode_t(head) ! dllnode_copy
+  print '("HeadC export = ",*(i0,1x))', dllnode_export(head_c)
+
+  ! Deallocation tests
+  print *
+  found => dllnode_find(head, int([6,6],DATA_KIND))
+  call dllnode_freechain(found)
+  print '("Head after removal = ",*(i0,1x))', dllnode_export(head)
+  print '("HeadB export = ",*(i0,1x))', dllnode_export(head_b)
+  print '("HeadC export = ",*(i0,1x))', dllnode_export(head_c)
+
+  call dllnode_freechain(head)
+  print '("Head after removal = ",*(i0,1x))', dllnode_export(head)
+  call dllnode_freechain(head_b)
+  print '("HeadB export = ",*(i0,1x))', dllnode_export(head_b)
+  call dllnode_freechain(head_c)
+  print '("HeadB export = ",*(i0,1x))', dllnode_export(head_c)
+
+
+
 end subroutine test1
