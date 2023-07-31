@@ -1,5 +1,5 @@
-! Defines "node" type and basic operations with the chain of 
-! nodes.
+!* Defines "node" type and basic operations with the chain of 
+!  nodes.
 !
 module dllnode_mod
   use iso_fortran_env, only : int64
@@ -11,6 +11,7 @@ module dllnode_mod
     DATA_SIZE=2
 
   type, public :: dllnode_t
+    !! A node of a double-linked list
     private
     integer(kind=DATA_KIND) :: data(DATA_SIZE)
     type(dllnode_t), pointer :: next => null()
@@ -57,6 +58,7 @@ contains
   ! ================================
 
   function dllnode_new(data) result(new)
+    !! Allocate new node, fill it with data, return the pointer to the new node
     integer(DATA_KIND), intent(in) :: data(:)
     type(dllnode_t), pointer :: new
 
@@ -74,6 +76,7 @@ contains
 
 
   subroutine dllnode_update(node,data)
+    !! Update the data content of the node by data
     type(dllnode_t), intent(in), pointer :: node
     integer(DATA_KIND), intent(in) :: data(:)
 
@@ -86,6 +89,7 @@ contains
 
 
   function dllnode_read(node) result(data)
+    !! Return the node data
     type(dllnode_t), intent(in), pointer :: node
     integer(DATA_KIND) :: data(size(mold%data))
     if (.not. associated(node)) &
@@ -95,6 +99,7 @@ contains
 
 
   subroutine dllnode_free(deleted)
+    !! Dealocate the node from memory
     type(dllnode_t), pointer, intent(inout) :: deleted
 
     integer :: ierr
@@ -118,6 +123,8 @@ contains
   ! ========================================
 
   function dllnode_count(head) result(n)
+    !! Return the number of nodes starting with *head* node and traversing 
+    !! the chain forward
     type(dllnode_t), pointer, intent(in) :: head
     integer :: n
 
@@ -133,6 +140,8 @@ contains
 
 
   function dllnode_export(head) result(arr)
+    !! Return rank-2 array with the data from all nodes starting with *head*
+    !! and traversing the chain forward
     type(dllnode_t), pointer, intent(in) :: head
     integer(DATA_KIND), allocatable :: arr(:,:)
 
@@ -152,6 +161,8 @@ contains
 
 
   function dllnode_import(arr) result(head)
+    !! Make a new chain of nodes with data from rank-2 array, return the
+    !! pointer to the head of the chain
     integer(DATA_KIND), intent(in) :: arr(:,:)
     type(dllnode_t), pointer :: head
 
@@ -170,12 +181,10 @@ contains
 
 
   function dllnode_copy(oldhead) result(newhead)
+    !! Make a new list that is a copy of the chain starting with *oldhead*
+    !! and traversing the chain forwards
     type(dllnode_t), pointer, intent(in) :: oldhead
     type(dllnode_t), pointer :: newhead
-!
-! Make a new list that is the copy of the chain starting with
-! item "oldhead"
-!
     type(dllnode_t), pointer :: current, head1
 
     newhead => null()
@@ -196,20 +205,19 @@ contains
 
 
   subroutine dllnode_insertinfrontof(where, new, output)
+    !! Insert node *new* in front of node *where*.
+    !! Optional *output* points to the inserted node in the chain
     type(dllnode_t), pointer, intent(in) :: where, new
     type(dllnode_t), pointer, intent(out), optional :: output
-!
-! Insert "new" in front of "where".
-! Optional "output" points to the inserted node
-!
+
     if (present(output)) output => new
     if (associated(new%prev) .or. associated(new%next)) &
         error stop 'dll_insertinfrontof ERROR: inserted node is not a single node'
     if (.not. associated(where)) return
 
     ! the chain before
-    !  PREV -> WHERE 
-    !      <-          :- NEW -: 
+    !  PREV -> WHERE
+    !      <-          :- NEW -:
     ! the chain after
     !  PREV -4> NEW -2> WHERE
     !       <1-     <3-
@@ -221,14 +229,13 @@ contains
 
 
   subroutine dllnode_remove(what, deleted, next_in_chain)
+    !! Remove *what* from chain. On return, *deleted* points to the
+    !! removed node, the node must be dealocated else-where. 
+    !! Pointer *next_in_chain* points preferentialy to the next node
+    !! (if it exists), or to the prev node, or to null.
     type(dllnode_t), pointer, intent(in) :: what
     type(dllnode_t), pointer, intent(out) :: deleted, next_in_chain
-!
-! Remove "what" from chain. On return, "deleted" points to the
-! removed node and must be dealocated else-where, 
-! "next_in_chain" points preferentialy to the next node
-! (if it exists), or to the prev node, or to null.
-!
+ 
     deleted => what
     next_in_chain => null()
     if (.not. associated(what)) return
@@ -244,12 +251,10 @@ contains
 
 
   subroutine dllnode_freechain(first)
+    !! Remove and deallocate the whole chain starting with *first*
+    !! The NEXT pointer of a node in front of *first* is also modified
     type(dllnode_t), intent(inout), pointer :: first
-!
-! Remove and deallocate whole chain starting with "first"
-! The NEXT pointer of an node in front of "first" is also
-! modified
-!
+ 
     type(dllnode_t), pointer :: deleted
 
     if (.not. associated(first)) return
@@ -272,6 +277,8 @@ contains
   ! ===============================
 
   function dllnode_find(start, value) result(found)
+    !! Traverse the chain forward from *start* node. Return pointer to the
+    !! node that matches the *value* or null if the search failed.
     type(dllnode_t), pointer, intent(in) :: start
     integer(DATA_KIND), intent(in) :: value(:)
     type(dllnode_t), pointer :: found
@@ -294,6 +301,7 @@ contains
   
 
   function dllnode_head(start) result(head)
+    !! Return the pointer to the node at the head of the chain
     type(dllnode_t), pointer, intent(in) :: start
     type(dllnode_t), pointer :: head
 
@@ -307,6 +315,7 @@ contains
 
 
   function dllnode_tail(start) result(tail)
+    !! Return the pointer to the node at the end of the chain
     type(dllnode_t), pointer, intent(in) :: start
     type(dllnode_t), pointer :: tail
 
