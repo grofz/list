@@ -24,6 +24,7 @@ subroutine test1()
   print '("Head node is = ",L)', associated(dllnode_head(head))
   print '("3 node is = ",L)', &
       associated(dllnode_find(head,int([3,33],DATA_KIND)))
+  print '("Is valid an empty node ? ",L)', dllnode_validate(head)
 
   ! Add nodes to the list
   do i=1, MAXN
@@ -33,7 +34,14 @@ subroutine test1()
         head1)
     head => head1
     print '("Head export = ",*(i0,1x))', dllnode_export(head)
+    print '("Is list valid? ",L)', dllnode_validate(head)
   end do
+
+  print '("Sorting...")'
+  head => dllnode_mergesort(head, cfun_my)
+  print '("... sorted")'
+  print '("After sort = ",*(i0,1x))', dllnode_export(head)
+  print '("Is list valid? ",L)', dllnode_validate(head)
 
   found=>dllnode_find(head,int([7,7],DATA_KIND))
   if (associated(found)) then
@@ -48,6 +56,8 @@ subroutine test1()
   print '("Head node is = ",*(i0,1x))', dllnode_read(dllnode_head(head))
   print '("42 node is = ",*(i0,1x))', &
       dllnode_read(dllnode_find(head,int([42,42],DATA_KIND)))
+  print '("Is list valid? Should be F ",L)', dllnode_validate(dllnode_find(head,int([42,42],DATA_KIND)))
+
 
   ! Delete nodes from the list
   do i=MAXN,1,-3
@@ -77,6 +87,9 @@ subroutine test1()
   !head_c =>  dllnode_t(found) ! dllnode_copy
   head_c =>  dllnode_t(head) ! dllnode_copy
   print '("HeadC export = ",*(i0,1x))', dllnode_export(head_c)
+  head_c => dllnode_mergesort(head_c, cfun_my)
+  print '("HeadC sorted = ",*(i0,1x))', dllnode_export(head_c)
+  print '("Is list valid? ",L)', dllnode_validate(head)
 
   ! Deallocation tests
   print *
@@ -93,6 +106,17 @@ subroutine test1()
   call dllnode_freechain(head_c)
   print '("HeadB export = ",*(i0,1x))', dllnode_export(head_c)
 
+contains
+  integer function cfun_my(a, b) result(ierr)
+    integer(DATA_KIND), dimension(DATA_SIZE), intent(in) :: a, b
+    if (a(1) < b(1)) then
+      ierr = -1
+    else if (a(1)==b(1)) then
+      ierr = 0
+    else
+      ierr = 1
+    end if
+  end function cfun_my
 
 
 end subroutine test1

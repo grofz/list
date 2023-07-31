@@ -25,12 +25,24 @@ module dllnode_mod
     module procedure dllnode_copy
   end interface
 
+  abstract interface
+    function compare_fun(adat, bdat) result(ires)
+      !! User function to compare value of two nodes and return:
+      !! "-1" if A<B, "0" if A==B, or "1" if A>B
+      import :: DATA_KIND, DATA_SIZE
+      implicit none
+      integer(DATA_KIND), dimension(DATA_SIZE), intent(in) :: adat, bdat
+      integer :: ires
+    end function
+  end interface
+
   type(dllnode_t) :: mold
 
   public dllnode_update, dllnode_read, dllnode_free
   public dllnode_count, dllnode_export
   public dllnode_insertinfrontof, dllnode_remove, dllnode_freechain
-  public dllnode_find, dllnode_head, dllnode_tail
+  public dllnode_find, dllnode_head, dllnode_tail, dllnode_validate
+  public dllnode_mergesort
 
 contains
 
@@ -123,7 +135,7 @@ contains
   ! ========================================
 
   function dllnode_count(head) result(n)
-    !! Return the number of nodes starting with *head* node and traversing 
+    !! Return the number of nodes starting with **head** node and traversing
     !! the chain forward
     type(dllnode_t), pointer, intent(in) :: head
     integer :: n
@@ -140,7 +152,7 @@ contains
 
 
   function dllnode_export(head) result(arr)
-    !! Return rank-2 array with the data from all nodes starting with *head*
+    !! Return rank-2 array with the data from all nodes starting with **head**
     !! and traversing the chain forward
     type(dllnode_t), pointer, intent(in) :: head
     integer(DATA_KIND), allocatable :: arr(:,:)
@@ -181,7 +193,7 @@ contains
 
 
   function dllnode_copy(oldhead) result(newhead)
-    !! Make a new list that is a copy of the chain starting with *oldhead*
+    !! Make a new list that is a copy of the chain starting with **oldhead**
     !! and traversing the chain forwards
     type(dllnode_t), pointer, intent(in) :: oldhead
     type(dllnode_t), pointer :: newhead
@@ -205,8 +217,8 @@ contains
 
 
   subroutine dllnode_insertinfrontof(where, new, output)
-    !! Insert node *new* in front of node *where*.
-    !! Optional *output* points to the inserted node in the chain
+    !! Insert node **new** in front of node **where**.
+    !! Optional **output** points to the inserted node in the chain
     type(dllnode_t), pointer, intent(in) :: where, new
     type(dllnode_t), pointer, intent(out), optional :: output
 
@@ -229,9 +241,9 @@ contains
 
 
   subroutine dllnode_remove(what, deleted, next_in_chain)
-    !! Remove *what* from chain. On return, *deleted* points to the
+    !! Remove **what** from chain. On return, **deleted** points to the
     !! removed node, the node must be dealocated else-where. 
-    !! Pointer *next_in_chain* points preferentialy to the next node
+    !! Pointer **next_in_chain** points preferentialy to the next node
     !! (if it exists), or to the prev node, or to null.
     type(dllnode_t), pointer, intent(in) :: what
     type(dllnode_t), pointer, intent(out) :: deleted, next_in_chain
@@ -251,8 +263,8 @@ contains
 
 
   subroutine dllnode_freechain(first)
-    !! Remove and deallocate the whole chain starting with *first*
-    !! The NEXT pointer of a node in front of *first* is also modified
+    !! Remove and deallocate the whole chain starting with **first**
+    !! The NEXT pointer of a node in front of **first** is also modified
     type(dllnode_t), intent(inout), pointer :: first
  
     type(dllnode_t), pointer :: deleted
@@ -274,11 +286,12 @@ contains
   ! Search for a particular node
   ! Move to the head of the chain
   ! Move to the tail of the chain
+  ! Validate the chain
   ! ===============================
 
   function dllnode_find(start, value) result(found)
-    !! Traverse the chain forward from *start* node. Return pointer to the
-    !! node that matches the *value* or null if the search failed.
+    !! Traverse the chain forward from **start** node. Return pointer to the
+    !! node that matches the **value** or null if the search failed.
     type(dllnode_t), pointer, intent(in) :: start
     integer(DATA_KIND), intent(in) :: value(:)
     type(dllnode_t), pointer :: found
@@ -326,5 +339,119 @@ contains
       tail => tail%next
     end do
   end function dllnode_tail
+
+
+  function dllnode_validate(head) result(isvalid)
+    !! Verify that the double-linked list at **head** is valid
+    type(dllnode_t), pointer, intent(in) :: head
+    logical :: isvalid
+
+    type(dllnode_t), pointer :: current
+
+    ! Empty list is valid
+    isvalid = .true.
+    if (.not. associated(head)) return
+
+    ! Head node must not have a previous node
+    if (associated(head%prev)) isvalid = .false.
+    if (.not. isvalid) return
+
+    ! Next node must have a back-link to current node
+    current => head
+    do
+      if (.not. associated(current%next)) exit
+      if (.not. associated(current%next%prev, current)) then
+        isvalid = .false.
+        return
+      end if
+      current => current%next
+    end do
+  end function dllnode_validate
+
+
+  ! =====================================================================
+  ! Sort the list
+  ! Ref: https://www.geeksforgeeks.org/merge-sort-for-doubly-linked-list
+  ! =====================================================================
+
+  recursive function dllnode_mergesort(head, cfun) result(sortedhead)
+    !! Sort the list starting at **head**, return a new head pointer
+    !! **cfun** is a function that returns -1|0|1 based on the comparison
+    !! of two nodes.
+    type(dllnode_t), intent(in), pointer :: head
+    procedure(compare_fun) :: cfun
+
+    type(dllnode_t), pointer :: sortedhead
+
+    type(dllnode_t), pointer :: headone, headtwo
+
+    ! zero- or one-sized list is sorted
+    sortedhead => head
+    if (.not. associated(head)) return
+    if (.not. associated(head%next)) return
+
+    ! split into two and sort left and right halves recursively
+    headtwo => split(head)
+    headone => dllnode_mergesort(head, cfun)
+    headtwo => dllnode_mergesort(headtwo, cfun)
+
+    ! merge sorted halves
+    sortedhead => merge0(headone, headtwo, cfun)
+  end function dllnode_mergesort
+
+
+  function split(head) result(two)
+    !! Split the chain in the middle, eg. 1|1, 2|1, 2|2, 3|2, etc.,
+    !! and return pointer at the second half
+    type(dllnode_t), intent(in), pointer :: head
+    type(dllnode_t), pointer :: two
+
+    type(dllnode_t), pointer :: fast, slow
+
+    fast => head
+    slow => head
+    do
+      ! it is assummed the chain has two or more nodes,
+      ! therefore the loop will run at least once
+      if (.not. associated(fast%next)) exit
+      if (.not. associated(fast%next%next)) exit
+      fast => fast%next%next
+      slow => slow%next
+    end do
+    ! "slow" now points at the middle-node (odd number of nodes) or
+    ! at the node before middle of the chain (even number of nodes)
+    ! "slow" is therefore the last node of the first half
+    two => slow%next
+    slow%next => null()
+  end function split
+
+
+  recursive function merge0(headone, headtwo, cfun) result(mergedhead)
+    type(dllnode_t), intent(in), pointer :: headone, headtwo
+    procedure(compare_fun) :: cfun
+    type(dllnode_t), pointer :: mergedhead
+
+    if (.not. associated(headone)) then
+      mergedhead => headtwo
+      return
+    else if (.not. associated(headtwo)) then
+      mergedhead => headone
+      return
+    end if
+
+    ! Select a smaller value
+    if (cfun(headone%data, headtwo%data) < 0) then
+      headone%next => merge0(headone%next, headtwo, cfun)
+      headone%next%prev => headone
+      headone%prev => null()
+      mergedhead => headone
+    else
+      headtwo%next => merge0(headone, headtwo%next, cfun)
+      headtwo%next%prev => headtwo
+      headtwo%prev => null()
+      mergedhead => headtwo
+    end if
+  end function merge0
+
 
 end module dllnode_mod

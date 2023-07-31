@@ -1,5 +1,5 @@
-Markdown:
-https://www.markdowntutorial.com/
+Markdown: https://www.markdowntutorial.com/
 
-FORD:
-https://forddocs.readthedocs.io/en/latest/
+FORD: https://forddocs.readthedocs.io/en/latest/
+
+Sorting linked-list: https://www.geeksforgeeks.org/merge-sort-for-linked-list/
