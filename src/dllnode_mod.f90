@@ -1,17 +1,22 @@
-!* Defines "node" type and basic operations with the chain of 
-!  nodes.
-!
 module dllnode_mod
+  !* Here we define the **double-linked list node** and provide basic
+  !  operations with the node or a chain of nodes.
+  !
+  !  The data in the list are stored as a fixed size array of integers, but
+  !  any type can be stored if user wraps the data (i.e. via using
+  !  `transfer`function).
+  !
   use iso_fortran_env, only : int64
   implicit none
   private
 
-  integer, parameter, public :: &
-    DATA_KIND=int64, &
-    DATA_SIZE=2
+  integer, parameter, public :: DATA_KIND=int64
+  !!  Kind of integer array to store node data
+  integer, parameter, public :: DATA_SIZE=4
+  !!  Size of integer array to store node data (modify if necessary)
 
   type, public :: dllnode_t
-    !! A node of a double-linked list
+    !! Double-linked list node
     private
     integer(kind=DATA_KIND) :: data(DATA_SIZE)
     type(dllnode_t), pointer :: next => null()
@@ -20,6 +25,13 @@ module dllnode_mod
     procedure :: gonext, goprev
   end type dllnode_t
   interface dllnode_t
+    !* Use the following argument in the constructor to:
+    !
+    !   * rank-1 array to return a single node
+    !
+    !   * rank-2 array to return a chain of nodes
+    !
+    !   * pointer to the head-node makes to return a copy of the chain
     module procedure dllnode_new
     module procedure dllnode_import
     module procedure dllnode_copy
@@ -27,21 +39,30 @@ module dllnode_mod
 
   abstract interface
     function compare_fun(adat, bdat) result(ires)
-      !! User function to compare value of two nodes and return:
-      !! "-1" if A<B, "0" if A==B, or "1" if A>B
+      !* An user function to compare value of two nodes and return:
+      !
+      ! * -1 if A is less than B;
+      !
+      ! *  0 if A equals B;
+      !
+      ! * +1 if A is greater than B
       import :: DATA_KIND, DATA_SIZE
       implicit none
       integer(DATA_KIND), dimension(DATA_SIZE), intent(in) :: adat, bdat
       integer :: ires
     end function
   end interface
+  public compare_fun
 
-  type(dllnode_t) :: mold
+  integer(DATA_KIND), public :: mold(DATA_SIZE)
+  !* This variable can be used as _mold_ argument in `transfer` function
+  !  to cast the user type variable to the type accepted in argument of
+  !  `dllnode_*` subroutines and functions
 
   public dllnode_update, dllnode_read, dllnode_free
   public dllnode_count, dllnode_export
-  public dllnode_insertinfrontof, dllnode_remove, dllnode_freechain
-  public dllnode_reverse
+  public dllnode_insertinfrontof, dllnode_insertbehind
+  public dllnode_remove, dllnode_freechain, dllnode_reverse
   public dllnode_find, dllnode_head, dllnode_tail, dllnode_validate
   public dllnode_mergesort
 
@@ -79,7 +100,7 @@ contains
 
     integer :: ierr
 
-    if (size(data,1)/=size(mold%data,1)) &
+    if (size(data,1)/=size(mold,1)) &
         error stop 'dllnode_new ERROR: input array size is wrong'
     allocate(new, stat=ierr)
     if (ierr /= 0) &
@@ -95,7 +116,7 @@ contains
     type(dllnode_t), intent(in), pointer :: node
     integer(DATA_KIND), intent(in) :: data(:)
 
-    if (size(data,1)/=size(mold%data,1)) &
+    if (size(data,1)/=size(mold,1)) &
         error stop 'dllnode_update ERROR: input array size is wrong'
     if (.not. associated(node)) &
         error stop 'dllnode_update ERROR: node is null'
@@ -106,7 +127,7 @@ contains
   function dllnode_read(node) result(data)
     !! Return the node data
     type(dllnode_t), intent(in), pointer :: node
-    integer(DATA_KIND) :: data(size(mold%data))
+    integer(DATA_KIND) :: data(size(mold))
     if (.not. associated(node)) &
         error stop 'dllnode_read ERROR: node is null'
     data = node%data
@@ -165,7 +186,7 @@ contains
     type(dllnode_t), pointer :: current
 
     n = dllnode_count(head)
-    allocate(arr(size(mold%data,1),n))
+    allocate(arr(size(mold,1),n))
     current => head
     do i = 1, n
       if (.not. associated(current)) &
@@ -185,7 +206,7 @@ contains
     integer :: i, n
     type(dllnode_t), pointer :: head1
 
-    if (size(arr,1)/=size(mold%data,1)) &
+    if (size(arr,1)/=size(mold,1)) &
         error stop 'dllnode_import ERROR: input array rows count is wrong'
     n = size(arr,2)
     head => null()
@@ -242,6 +263,25 @@ contains
     where%prev => new         ! (3)
     if (associated(new%prev)) new%prev%next => new ! (4)
   end subroutine dllnode_insertinfrontof
+
+
+  subroutine dllnode_insertbehind(where, new, output)
+    !! Insert node **new** behind node **where**.
+    !! Optional **output** points to the inserted node in the chain
+    type(dllnode_t), pointer, intent(in) :: where, new
+    type(dllnode_t), pointer, intent(out), optional :: output
+
+    if (present(output)) output => new
+    if (associated(new%prev) .or. associated(new%next)) &
+        error stop 'dll_insertbehind ERROR: inserted node is not a single node'
+
+    if (.not. associated(where)) return
+
+    new%next => where%next
+    new%prev => where
+    where%next => new
+    if (associated(new%next)) new%next%prev => new
+  end subroutine dllnode_insertbehind
 
 
   subroutine dllnode_remove(what, deleted, next_in_chain)
@@ -329,7 +369,7 @@ contains
 
     type(dllnode_t), pointer :: current
 
-    if (size(value,1) /= size(mold%data,1)) &
+    if (size(value,1) /= size(mold,1)) &
         error stop 'dllnode_find ERROR: wrong array size'
     current => start
     found => null()
@@ -483,9 +523,6 @@ contains
       mergedhead => headtwo
     end if
   end function merge0
-
-
-
 
 
 end module dllnode_mod

@@ -5,9 +5,12 @@ program test_dll
     end subroutine test1
     subroutine test2()
     end subroutine test2
+    subroutine test3()
+    end subroutine test3
   end interface
   !call test1()
-  call test2()
+  !call test2()
+  call test3()
 end program test_dll
 
 subroutine test1()
@@ -164,3 +167,82 @@ subroutine test2()
   end do
   call dllnode_freechain(head)
 end subroutine test2
+
+
+subroutine test3()
+  use dll_mod
+  use iso_fortran_env, only : int64
+  use dllnode_mod
+  implicit none
+
+  !real(int64) :: x(2)
+  type :: mytype_t
+    integer :: a
+    real :: b
+    real :: c
+  end type
+  type(dll_t) :: root
+
+  type(mytype_t), target :: x, y
+  type(dllnode_t), pointer :: head, head_b
+
+
+  x = mytype_t( -42, 3.14, 32e-12)
+  y = mytype_t(-32,5.43,10)
+  !head => dllnode_t(win(x))
+  !head_b => dllnode_t(head)
+  !call dllnode_update(head_b,win(mytype_t(-32,5.43,10)))
+  !y = wout(dllnode_read(head_b))
+
+  call root%append(win(x))
+  call root%append(win(x))
+  call root%append(win(x))
+  call root%append(win(y))
+  call root%append(win(y))
+call printlist
+! print *, 'count method: 2', root%count(win(y))
+! print *, 'associated = T',associated(root%index(win(y)))
+  call root%remove(win(y))
+  print *, 'count method: 1', root%count(win(y))
+! call root%remove(win(y))
+  print *, 'count method: 0', root%count(win(y))
+! call root%remove(win(y))
+  print *, 'count method: 0', root%count(win(y))
+
+  call root%reverse()
+call printlist
+  call root%clear()
+call printlist
+
+! print *, 'size of node ', sizeof(x), storage_size(x), storage_size(mold)
+! print *, 'size of mold', sizeof(mold)
+! print *, 'transfer ', transfer(x, mold, DATA_SIZE)
+! print *, 'transfer ', transfer(x, mold)
+
+contains
+  subroutine printlist
+    type(dllnode_t), pointer :: head
+
+    head => root%firstnode()
+    print '("The list is")'
+    do
+      if (.not. associated(head)) exit
+      print *, wout(dllnode_read(head))
+      head => head%gonext()
+    end do
+    print *
+  end subroutine
+
+  pure function win(dat) result(arr)
+    type(mytype_t), intent(in) :: dat
+    integer(DATA_KIND) :: arr(DATA_SIZE)
+    arr = transfer(dat,mold,DATA_SIZE)
+  end function
+
+  pure function wout(arr) result(dat)
+    integer(DATA_KIND), intent(in) :: arr(DATA_SIZE)
+    type(mytype_t) :: dat
+    dat = transfer(arr,dat)
+  end function
+
+end subroutine test3
