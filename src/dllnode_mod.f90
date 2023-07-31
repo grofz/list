@@ -41,6 +41,7 @@ module dllnode_mod
   public dllnode_update, dllnode_read, dllnode_free
   public dllnode_count, dllnode_export
   public dllnode_insertinfrontof, dllnode_remove, dllnode_freechain
+  public dllnode_reverse
   public dllnode_find, dllnode_head, dllnode_tail, dllnode_validate
   public dllnode_mergesort
 
@@ -50,12 +51,14 @@ contains
   ! Next and previous (TBP's)
   ! ==========================
   function goprev(this)
+    !! Return the pointer to the next node in the list
     class(dllnode_t), intent(in) :: this
     type(dllnode_t), pointer :: goprev
     goprev => this%prev
   end function goprev
 
   function gonext(this)
+    !! Return the pointer to the previous node in the list
     class(dllnode_t), intent(in) :: this
     type(dllnode_t), pointer :: gonext
     gonext => this%next
@@ -132,6 +135,7 @@ contains
   ! Insert node to the chain
   ! Remove node from the chain
   ! Remove and deallocate nodes in the chain
+  ! Reverse the chain
   ! ========================================
 
   function dllnode_count(head) result(n)
@@ -280,6 +284,33 @@ contains
       if (.not. associated(first)) exit
     end do
   end subroutine dllnode_freechain
+
+
+  function dllnode_reverse(head) result(newhead)
+    !! Reverse the double-linked list, return pointer to the new head
+    type(dllnode_t), intent(in), pointer :: head
+    type(dllnode_t), pointer :: newhead
+
+    type(dllnode_t), pointer :: current, temp
+
+    ! Ref: https://www.geeksforgeeks.org/reverse-a-doubly-linked-list/
+    temp => null()
+    current => head
+    do
+      if (.not. associated(current)) exit
+      temp => current%prev
+      current%prev => current%next
+      current%next => temp
+      current => current%prev
+    end do
+
+    ! Do not change head if the list is empty or contains just one node
+    if (.not. associated(temp)) then
+      newhead => head
+    else
+      newhead => temp%prev
+    end if
+  end function dllnode_reverse
 
 
   ! ===============================
@@ -452,6 +483,9 @@ contains
       mergedhead => headtwo
     end if
   end function merge0
+
+
+
 
 
 end module dllnode_mod

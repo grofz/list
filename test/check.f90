@@ -3,8 +3,11 @@ program test_dll
   interface
     subroutine test1()
     end subroutine test1
+    subroutine test2()
+    end subroutine test2
   end interface
-  call test1()
+  !call test1()
+  call test2()
 end program test_dll
 
 subroutine test1()
@@ -118,5 +121,46 @@ contains
     end if
   end function cfun_my
 
-
 end subroutine test1
+
+
+subroutine test2()
+  use dllnode_mod
+  implicit none
+
+  type(dllnode_t), pointer :: head, head1
+  integer :: i
+  integer, parameter :: MAXN = 10
+  integer(DATA_KIND), allocatable :: data(:,:)
+
+  ! Working with an empty list
+  head => null()
+  head => dllnode_reverse(head)
+  print '("Is valid an empty node ? ",L)', dllnode_validate(head)
+
+
+  ! Add nodes to the list
+  do i=1, MAXN
+    call dllnode_insertinfrontof(       &
+        head,                           &
+        dllnode_t(int([i,i],DATA_KIND)),  &
+        head1)
+    head => head1
+    print '("Head export = ",*(i0,1x))', dllnode_export(head)
+    print '("Is list valid? ",L)', dllnode_validate(head)
+    if (i==1) then
+      head => dllnode_reverse(head)
+      print '("Is list valid? ",L)', dllnode_validate(head)
+      print '("After reverse = ",*(i0,1x))', dllnode_export(head)
+    else if (i==2) then
+      head => dllnode_reverse(head)
+      print '("Is list valid? ",L)', dllnode_validate(head)
+      print '("After reverse = ",*(i0,1x))', dllnode_export(head)
+    else if (i==MAXN) then
+      head => dllnode_reverse(head)
+      print '("Is list valid? ",L)', dllnode_validate(head)
+      print '("After reverse = ",*(i0,1x))', dllnode_export(head)
+    end if
+  end do
+  call dllnode_freechain(head)
+end subroutine test2
