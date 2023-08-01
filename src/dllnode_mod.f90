@@ -12,13 +12,18 @@ module dllnode_mod
 
   integer, parameter, public :: DATA_KIND=int64
   !!  Kind of integer array to store node data
-  integer, parameter, public :: DATA_SIZE=4
+  integer, parameter, public :: DATA_MAXSIZE=4
   !!  Size of integer array to store node data (modify if necessary)
+
+  integer(DATA_KIND), public :: mold(DATA_MAXSIZE)
+  !* This variable can be used as _mold_ argument in `transfer` function
+  !  to cast the user type variable to the type accepted in argument of
+  !  `dllnode_*` subroutines and functions
 
   type, public :: dllnode_t
     !! Double-linked list node
     private
-    integer(kind=DATA_KIND) :: data(DATA_SIZE)
+    integer(kind=DATA_KIND) :: data(DATA_MAXSIZE)
     type(dllnode_t), pointer :: next => null()
     type(dllnode_t), pointer :: prev => null()
   contains
@@ -46,18 +51,13 @@ module dllnode_mod
       ! *  0 if A equals B;
       !
       ! * +1 if A is greater than B
-      import :: DATA_KIND, DATA_SIZE
+      import :: DATA_KIND, mold
       implicit none
-      integer(DATA_KIND), dimension(DATA_SIZE), intent(in) :: adat, bdat
+      integer(DATA_KIND), dimension(size(mold)), intent(in) :: adat, bdat
       integer :: ires
     end function
   end interface
   public compare_fun
-
-  integer(DATA_KIND), public :: mold(DATA_SIZE)
-  !* This variable can be used as _mold_ argument in `transfer` function
-  !  to cast the user type variable to the type accepted in argument of
-  !  `dllnode_*` subroutines and functions
 
   public dllnode_update, dllnode_read, dllnode_free
   public dllnode_count, dllnode_export
@@ -100,7 +100,7 @@ contains
 
     integer :: ierr
 
-    if (size(data,1)/=size(mold,1)) &
+    if (size(data,1) /= size(mold,1)) &
         error stop 'dllnode_new ERROR: input array size is wrong'
     allocate(new, stat=ierr)
     if (ierr /= 0) &
@@ -111,12 +111,12 @@ contains
   end function dllnode_new
 
 
-  subroutine dllnode_update(node,data)
+  subroutine dllnode_update(node, data)
     !! Update the data content of the node by data
     type(dllnode_t), intent(in), pointer :: node
     integer(DATA_KIND), intent(in) :: data(:)
 
-    if (size(data,1)/=size(mold,1)) &
+    if (size(data,1) /= size(mold,1)) &
         error stop 'dllnode_update ERROR: input array size is wrong'
     if (.not. associated(node)) &
         error stop 'dllnode_update ERROR: node is null'
@@ -191,7 +191,8 @@ contains
     do i = 1, n
       if (.not. associated(current)) &
           error stop 'dllnode_export ERROR: unexpected end of chain'
-      arr(:,i) = current%data
+      !!!arr(:,i) = current%data
+      arr(:,i) = dllnode_read(current)
       current => current%next
     end do
   end function dllnode_export
@@ -206,8 +207,8 @@ contains
     integer :: i, n
     type(dllnode_t), pointer :: head1
 
-    if (size(arr,1)/=size(mold,1)) &
-        error stop 'dllnode_import ERROR: input array rows count is wrong'
+    if (size(arr,1) /= size(mold,1)) &
+        error stop 'dllnode_import ERROR: input array rows are wrong number'
     n = size(arr,2)
     head => null()
     do i=n,1,-1

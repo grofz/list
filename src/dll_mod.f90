@@ -130,7 +130,7 @@ error stop 'not-implemented'
     if (.not. associated(where)) &
         error stop 'dll_insert ERROR: where is null pointer'
 
-    call dllnode_inesrinfrontof(where, dllnode_t(value), output)
+    call dllnode_insertinfrontof(where, dllnode_t(value), output)
     if (associated(where,this%head)) this%head => output
     this%n = this%n + 1
   end subroutine dll_insert

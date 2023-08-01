@@ -13,6 +13,7 @@ program test_dll
   call test3()
 end program test_dll
 
+
 subroutine test1()
   use dllnode_mod
   implicit none
@@ -114,7 +115,7 @@ subroutine test1()
 
 contains
   integer function cfun_my(a, b) result(ierr)
-    integer(DATA_KIND), dimension(DATA_SIZE), intent(in) :: a, b
+    integer(DATA_KIND), dimension(size(mold)), intent(in) :: a, b
     if (a(1) < b(1)) then
       ierr = -1
     else if (a(1)==b(1)) then
@@ -169,50 +170,152 @@ subroutine test2()
 end subroutine test2
 
 
-subroutine test3()
-  use dll_mod
+module user_mod
+  !! Used for test3
   use iso_fortran_env, only : int64
-  use dllnode_mod
+  use dll_mod
+  use dllnode_mod, only : dllnode_t, mold, DATA_KIND, dllnode_read
   implicit none
 
-  !real(int64) :: x(2)
-  type :: mytype_t
-    integer :: a
-    real :: b
-    real :: c
-  end type
+  integer, parameter :: MAXDIM=10
+  type :: testone_t
+    integer :: a(MAXDIM)
+  end type testone_t
+
+  type :: testtwo_t
+    type(testone_t), pointer :: ptr
+  end type testtwo_t
+
+  interface win
+    module procedure one2dat
+    module procedure two2dat
+    module procedure int2dat
+    module procedure real2dat
+  end interface
+
+contains
+
+  pure function one2dat(one) result(dat)
+    type(testone_t), intent(in) :: one
+    integer(DATA_KIND) :: dat(size(mold))
+    dat = transfer(one,mold,size(mold))
+  end function
+  pure function two2dat(one) result(dat)
+    type(testtwo_t), intent(in) :: one
+    integer(DATA_KIND) :: dat(size(mold))
+    dat = transfer(one,mold,size(mold))
+  end function
+  pure function int2dat(one) result(dat)
+    integer, intent(in) :: one
+    integer(DATA_KIND) :: dat(size(mold))
+    dat = transfer(one,mold,size(mold))
+  end function
+  pure function real2dat(one) result(dat)
+    real, intent(in) :: one
+    integer(DATA_KIND) :: dat(size(mold))
+    dat = transfer(one,mold,size(mold))
+  end function
+
+
+  pure function dat2one(dat) result(one)
+    integer(DATA_KIND), intent(in) :: dat(size(mold))
+    type(testone_t) :: one
+    one = transfer(dat,one)
+  end function
+  pure function dat2two(dat) result(one)
+    integer(DATA_KIND), intent(in) :: dat(size(mold))
+    type(testtwo_t) :: one
+    one = transfer(dat,one)
+  end function
+  pure function dat2int(dat) result(one)
+    integer(DATA_KIND), intent(in) :: dat(size(mold))
+    integer :: one
+    one = transfer(dat,one)
+  end function
+  pure function dat2real(dat) result(one)
+    integer(DATA_KIND), intent(in) :: dat(size(mold))
+    real :: one
+    one = transfer(dat,one)
+  end function
+
+end module user_mod
+
+
+subroutine test3()
+  !! Test of using list with different types
+  use user_mod
+  implicit none
+
   type(dll_t) :: root
+  type(dllnode_t), pointer :: node
+  type(testone_t), target :: x, y
+  type(testtwo_t) :: px, py
+  integer :: i
 
-  type(mytype_t), target :: x, y
-  type(dllnode_t), pointer :: head, head_b
+  ! Initialize test values
+  x = testone_t(42)
+  y = testone_t([(i,i=1,MAXDIM)])
+  px%ptr => x
+  py%ptr => null()
 
+  write(*,'("Empty list",t25)',advance='no')
+  call printlist
 
-  x = mytype_t( -42, 3.14, 32e-12)
-  y = mytype_t(-32,5.43,10)
-  !head => dllnode_t(win(x))
-  !head_b => dllnode_t(head)
-  !call dllnode_update(head_b,win(mytype_t(-32,5.43,10)))
-  !y = wout(dllnode_read(head_b))
-
-  call root%append(win(x))
-  call root%append(win(x))
+  ! TEST ONE: Add values to the list and print the list
   call root%append(win(x))
   call root%append(win(y))
-  call root%append(win(y))
-call printlist
+  call root%append(win(py))
+  call root%append(win(py))
+  call root%append(win(7))
+  call root%append(win(3.14))
+  write(*,'("Added some notes",t25)',advance='no')
+  call printlist
+
+! call root%reverse()
+! call printlist
+
+  ! TEST TWO: Search for node and print it
+  node => root%index(win(y))
+  if (associated(node)) then
+    associate(xx=>dat2one(dllnode_read(node)))
+      print *, '24? ', xx%a
+    end associate
+  else
+    print '("Searched node is not in the list")'
+  end if
+  node => root%index(win(py))
+  if (associated(node)) then
+    associate(p=>dat2two(dllnode_read(node)))
+      if (associated(p%ptr)) then
+        print *, 'Pointing to ',p%ptr%a
+      else
+        print *, 'Pointer not associated'
+      end if
+    end associate
+  else
+    print '("Searched node is not in the list")'
+  end if
+  node => root%index(win(7))
+  if (associated(node)) then
+    print *, dat2int(dllnode_read(node))
+  else
+    print '("Searched node is not in the list")'
+  end if
+  node => root%index(win(3.14))
+  if (associated(node)) then
+    print *, dat2real(dllnode_read(node))
+  else
+    print '("Searched node is not in the list")'
+  end if
+
 ! print *, 'count method: 2', root%count(win(y))
 ! print *, 'associated = T',associated(root%index(win(y)))
-  call root%remove(win(y))
-  print *, 'count method: 1', root%count(win(y))
 ! call root%remove(win(y))
-  print *, 'count method: 0', root%count(win(y))
-! call root%remove(win(y))
-  print *, 'count method: 0', root%count(win(y))
 
-  call root%reverse()
-call printlist
-  call root%clear()
-call printlist
+! call root%reverse()
+!call printlist
+!  call root%clear()
+!call printlist
 
 ! print *, 'size of node ', sizeof(x), storage_size(x), storage_size(mold)
 ! print *, 'size of mold', sizeof(mold)
@@ -222,27 +325,18 @@ call printlist
 contains
   subroutine printlist
     type(dllnode_t), pointer :: head
+    character(len=2) :: chw
 
     head => root%firstnode()
-    print '("The list is")'
+    write(chw,'(i0)') size(mold)
+    print '("The list is:")'
     do
       if (.not. associated(head)) exit
-      print *, wout(dllnode_read(head))
+      print '('//chw//'(i0,:,1x))', dllnode_read(head)
       head => head%gonext()
     end do
     print *
   end subroutine
 
-  pure function win(dat) result(arr)
-    type(mytype_t), intent(in) :: dat
-    integer(DATA_KIND) :: arr(DATA_SIZE)
-    arr = transfer(dat,mold,DATA_SIZE)
-  end function
-
-  pure function wout(arr) result(dat)
-    integer(DATA_KIND), intent(in) :: arr(DATA_SIZE)
-    type(mytype_t) :: dat
-    dat = transfer(arr,dat)
-  end function
 
 end subroutine test3
