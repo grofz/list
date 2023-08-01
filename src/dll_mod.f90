@@ -94,7 +94,9 @@ error stop 'not-implemented'
     current => this%head
     do
       if (.not. associated(current)) exit
-      if (all(value==dllnode_read(current))) n = n+1
+      associate(node_value=>dllnode_read(current))
+        if (all(value==node_value(1:size(value)))) n = n+1
+      end associate
       current => current%gonext()
     end do
   end function dll_count

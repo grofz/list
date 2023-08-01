@@ -2,6 +2,7 @@
 
 vpath %.f90 src
 vpath %.f90 test
+vpath %.f90 example
 
 FC = gfortran
 FFLAGS = -Og -std=f2018 -Wall -Wextra -pedantic -fimplicit-none -fcheck=all -fbacktrace
@@ -11,9 +12,18 @@ MAKEMOD = $(FC) $(FFLAGS) -fsyntax-only -c
 
 SOURCES = dllnode_mod.f90 \
     dll_mod.f90 \
-	  check.f90
+    user_mod.f90
 
-test.exe : $(subst .f90,.o,$(SOURCES))
+
+MAIN1 = check.f90
+MAIN2 = ex1.f90
+
+all :	test.exe ex1.exe
+
+test.exe : $(subst .f90,.o,$(SOURCES)) $(subst .f90,.o,$(MAIN1))
+	$(FC) -o $@ $+
+
+ex1.exe : $(subst .f90,.o,$(SOURCES)) $(subst .f90,.o,$(MAIN2))
 	$(FC) -o $@ $+
 
 .PHONY: clean

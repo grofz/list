@@ -23,7 +23,7 @@ module dllnode_mod
   type, public :: dllnode_t
     !! Double-linked list node
     private
-    integer(kind=DATA_KIND) :: data(DATA_MAXSIZE)
+    integer(kind=DATA_KIND) :: data(DATA_MAXSIZE) = 0
     type(dllnode_t), pointer :: next => null()
     type(dllnode_t), pointer :: prev => null()
   contains
@@ -100,12 +100,12 @@ contains
 
     integer :: ierr
 
-    if (size(data,1) /= size(mold,1)) &
-        error stop 'dllnode_new ERROR: input array size is wrong'
+    if (size(data,1) > size(mold,1)) &
+        error stop 'dllnode_new ERROR: input array size is too big to fit'
     allocate(new, stat=ierr)
     if (ierr /= 0) &
         error stop 'dllnode_new ERROR: could not allocate node'
-    new%data = data
+    new%data(1:size(data)) = data
     new%prev => null()
     new%next => null()
   end function dllnode_new
@@ -116,11 +116,11 @@ contains
     type(dllnode_t), intent(in), pointer :: node
     integer(DATA_KIND), intent(in) :: data(:)
 
-    if (size(data,1) /= size(mold,1)) &
-        error stop 'dllnode_update ERROR: input array size is wrong'
+    if (size(data,1) > size(mold,1)) &
+        error stop 'dllnode_update ERROR: input array size is too big to fit'
     if (.not. associated(node)) &
         error stop 'dllnode_update ERROR: node is null'
-    node%data = data
+    node%data(1:size(data)) = data
   end subroutine dllnode_update
 
 
@@ -370,16 +370,19 @@ contains
 
     type(dllnode_t), pointer :: current
 
-    if (size(value,1) /= size(mold,1)) &
-        error stop 'dllnode_find ERROR: wrong array size'
+    if (size(value,1) > size(mold,1)) &
+        error stop 'dllnode_find ERROR: array size too big'
     current => start
     found => null()
     do
       if (.not. associated(current)) exit
-      if (all(dllnode_read(current)==value)) then
-        found => current
-        exit
-      end if
+      associate(node_data=>dllnode_read(current))
+        !if (all(dllnode_read(current)==value)) then
+        if (all(node_data(1:size(value))==value)) then
+          found => current
+          exit
+        end if
+      end associate
       current => current%next
     end do
   end function dllnode_find
