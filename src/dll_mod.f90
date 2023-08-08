@@ -4,7 +4,7 @@
 !       enforced, that the specified node is part of the specified list.
 !       How to enforce this, while avoid traversing the list?
 !
-!       A possible solution is to add a DEBUG mode that can be enabled/disabled 
+!       A possible solution is to add a DEBUG mode that can be enabled/disabled
 !       that would make the checks...
 !
 
@@ -95,9 +95,11 @@ error stop 'not-implemented'
     do
       if (.not. associated(current)) exit
       associate(node_value=>dllnode_read(current))
-        if (all(value==node_value(1:size(value)))) n = n+1
+        if (size(node_value)==size(value)) then
+          if (all(value==node_value)) n = n+1
+        end if
       end associate
-      current => current%gonext()
+      current => current%nextnode()
     end do
   end function dll_count
 
@@ -197,5 +199,4 @@ error stop 'not-implemented'
     head => this%head
   end function dll_firstnode
 
-  
 end module dll_mod

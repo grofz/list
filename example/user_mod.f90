@@ -1,6 +1,6 @@
-
 module user_mod
   !! ## Example of using several data types in a list
+  !!
   !! Contains definition of user-types and wrapper functions
   use dll_mod
   use dllnode_mod, only : dllnode_t, mold, DATA_KIND, dllnode_read
@@ -52,28 +52,28 @@ contains
 
   pure function dat2one(dat) result(one)
     !! Wrapper to transform array of integers back to user type
-    integer(DATA_KIND), intent(in) :: dat(size(mold))
+    integer(DATA_KIND), intent(in) :: dat(:)
     type(testone_t) :: one
     one = transfer(dat,one)
   end function
 
   pure function dat2two(dat) result(one)
     !! Wrapper to transform array of integers back to user type
-    integer(DATA_KIND), intent(in) :: dat(size(mold))
+    integer(DATA_KIND), intent(in) :: dat(:)
     type(testtwo_t) :: one
     one = transfer(dat,one)
   end function
 
   pure function dat2int(dat) result(one)
     !! Wrapper to transform array of integers back to its type
-    integer(DATA_KIND), intent(in) :: dat(size(mold))
+    integer(DATA_KIND), intent(in) :: dat(:)
     integer :: one
     one = transfer(dat,one)
   end function
 
   pure function dat2real(dat) result(one)
     !! Wrapper to transform array of integers back to its type
-    integer(DATA_KIND), intent(in) :: dat(size(mold))
+    integer(DATA_KIND), intent(in) :: dat(:)
     real :: one
     one = transfer(dat,one)
   end function

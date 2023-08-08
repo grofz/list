@@ -1,58 +1,6 @@
-# List
-
-An easy-to-use Fortran list implementation.
-
-## Introduction
-
-This is work in progress.
-
-At the moment, the following modules are provided:
-
-* 'dllnode_mod' to work with individual nodes of double-linked list
-* `dll_mod' to work with double-linked lists using the Python-like
-   methods
-
-In the future, I intend to move here single linked list and other
-containers (trees, etc.).
-
-
-## Usage examples
-
-### 1. How to define user data type and wrapper functions (optional):
-
-```fortran
-module user_mod
-  use iso_fortran_env, only : int64
-  use dllnode_mod, only : DATA_KIND, mold
-  private
-  public test2dat, dat2test
-
-  type, public :: testtype_t
-    integer(int64) :: a(4)
-  end type
-
-contains
-
-  ! export wrapper
-  pure function test2dat(test) result(dat)
-    type(testtype_t), intent(in) :: test
-    integer(DATA_KIND), allocatable :: dat(:)
-    dat = transfer(one,mold)
-  end function
-
-  ! import wrapper
-  pure function dat2test(dat) result(test)
-    integer(DATA_KIND), intent(in) :: dat
-    type(testtype_t) :: test
-  end function
-end module
-```
-
-### 2. How to use `dllnode_mod` module
-
-```fortran
-program test_dllnode
+program example_dllnode
   use dllnode_mod
+  use user_mod
   implicit none
 
   type(dllnode_t), pointer :: head, newhead, copied_head, imported_head, &
@@ -133,15 +81,4 @@ contains
     end if
   end function
 
-end program test_dllnode
-```
-
-### Reference
-
-The idea using `transfer` function to emulate generic behavior of Fortran comes
-from an old paper:
-[Blevins, J. R., _ACM Fortran Forum_ **28**(3), 2-7 (2009).](https://jblevins.org/research/generic-list)
-
-### License
-
-This work-in-progress code is provided under the MIT license.
+end program example_dllnode

@@ -1,10 +1,12 @@
 module dllnode_mod
-  !* Here we define the **double-linked list node** and provide basic
-  !  operations with the node or a chain of nodes.
+  !* Definition of **double-linked list node** type.
+  !  Basic operations with the node or a chain of nodes.
   !
-  !  The data in the list are stored as a fixed size array of integers, but
-  !  any type can be stored if user wraps the data (i.e. via using
-  !  `transfer`function).
+  !  Data in the node stored as an allocatable array of integers,
+  !  but any type can be stored if user wraps the data, for example
+  !  by `transfer` function. It is assumed that different data types
+  !  will not be mixed within single list as there is no flag storing
+  !  the actual data type.
   !
   use iso_fortran_env, only : int64
   implicit none
@@ -12,10 +14,8 @@ module dllnode_mod
 
   integer, parameter, public :: DATA_KIND=int64
   !!  Kind of integer array to store node data
-  integer, parameter, public :: DATA_MAXSIZE=4
-  !!  Size of integer array to store node data (modify if necessary)
 
-  integer(DATA_KIND), public :: mold(DATA_MAXSIZE)
+  integer(DATA_KIND), public :: mold(1)
   !* This variable can be used as _mold_ argument in `transfer` function
   !  to cast the user type variable to the type accepted in argument of
   !  `dllnode_*` subroutines and functions
@@ -23,20 +23,20 @@ module dllnode_mod
   type, public :: dllnode_t
     !! Double-linked list node
     private
-    integer(kind=DATA_KIND) :: data(DATA_MAXSIZE) = 0
+    integer(kind=DATA_KIND), allocatable :: dat(:)
     type(dllnode_t), pointer :: next => null()
     type(dllnode_t), pointer :: prev => null()
   contains
-    procedure :: gonext, goprev
+    procedure :: nextnode, prevnode
   end type dllnode_t
   interface dllnode_t
-    !* Use the following argument in the constructor to:
+    !* Use the following argument in the constructor:
     !
     !   * rank-1 array to return a single node
     !
-    !   * rank-2 array to return a chain of nodes
+    !   * rank-1 array + meta-data arrays to return a chain of nodes
     !
-    !   * pointer to the head-node makes to return a copy of the chain
+    !   * pointer to the head-node to return a copy of the chain
     module procedure dllnode_new
     module procedure dllnode_import
     module procedure dllnode_copy
@@ -53,7 +53,7 @@ module dllnode_mod
       ! * +1 if A is greater than B
       import :: DATA_KIND, mold
       implicit none
-      integer(DATA_KIND), dimension(size(mold)), intent(in) :: adat, bdat
+      integer(DATA_KIND), dimension(:), intent(in) :: adat, bdat
       integer :: ires
     end function
   end interface
@@ -71,19 +71,18 @@ contains
   ! ==========================
   ! Next and previous (TBP's)
   ! ==========================
-  function goprev(this)
-    !! Return the pointer to the next node in the list
+
+  function prevnode(this) result(goprev)
     class(dllnode_t), intent(in) :: this
     type(dllnode_t), pointer :: goprev
     goprev => this%prev
-  end function goprev
+  end function prevnode
 
-  function gonext(this)
-    !! Return the pointer to the previous node in the list
+  function nextnode(this) result(gonext)
     class(dllnode_t), intent(in) :: this
     type(dllnode_t), pointer :: gonext
     gonext => this%next
-  end function gonext
+  end function nextnode
 
 
   ! ================================
@@ -100,37 +99,43 @@ contains
 
     integer :: ierr
 
-    if (size(data,1) > size(mold,1)) &
-        error stop 'dllnode_new ERROR: input array size is too big to fit'
     allocate(new, stat=ierr)
     if (ierr /= 0) &
-        error stop 'dllnode_new ERROR: could not allocate node'
-    new%data(1:size(data)) = data
+        error stop 'could not allocate new node'
+    allocate(new%dat(size(data)), stat=ierr)
+    if (ierr /= 0) &
+        error stop 'could not allocate data in new node'
+    new%dat = data
     new%prev => null()
     new%next => null()
   end function dllnode_new
 
 
-  subroutine dllnode_update(node, data)
-    !! Update the data content of the node by data
+  subroutine dllnode_update(node, newdata)
+    !! Update the data content of the node by newdata
     type(dllnode_t), intent(in), pointer :: node
-    integer(DATA_KIND), intent(in) :: data(:)
+    integer(DATA_KIND), intent(in) :: newdata(:)
 
-    if (size(data,1) > size(mold,1)) &
-        error stop 'dllnode_update ERROR: input array size is too big to fit'
     if (.not. associated(node)) &
-        error stop 'dllnode_update ERROR: node is null'
-    node%data(1:size(data)) = data
+        error stop 'could not update data: node is null'
+    if (allocated(node%dat)) then
+      if (size(newdata) /= size(node%dat)) deallocate(node%dat)
+    end if
+    if (.not. allocated(node%dat)) allocate(node%dat(size(newdata)))
+    node%dat = newdata
   end subroutine dllnode_update
 
 
   function dllnode_read(node) result(data)
     !! Return the node data
     type(dllnode_t), intent(in), pointer :: node
-    integer(DATA_KIND) :: data(size(mold))
+    integer(DATA_KIND), allocatable :: data(:)
     if (.not. associated(node)) &
-        error stop 'dllnode_read ERROR: node is null'
-    data = node%data
+        error stop 'could not read: node is null'
+    if (.not. allocated(node%dat)) &
+        error stop 'could not read: node contains no data'
+    allocate(data(size(node%dat)))
+    data = node%dat
   end function dllnode_read
 
 
@@ -142,9 +147,13 @@ contains
 
     if (.not. associated(deleted)) &
         error stop 'dllnode_free ERROR: null pointer'
+    ierr = 0
+    if (allocated(deleted%dat)) deallocate(deleted%dat, stat=ierr)
+    if (ierr /= 0) &
+        error stop 'could not free node: data deallocation failed'
     deallocate(deleted, stat=ierr)
     if (ierr /= 0) &
-        error stop 'dllnode_free ERROR: deallocation failed'
+        error stop 'could not free node: node deallocation failed'
   end subroutine dllnode_free
 
 
@@ -176,45 +185,107 @@ contains
   end function dllnode_count
 
 
-  function dllnode_export(head) result(arr)
-    !! Return rank-2 array with the data from all nodes starting with **head**
-    !! and traversing the chain forward
+  function dllnode_countval(head) result(n)
+    !! Return the total number of elements in data arrays of nodes in the list
+    integer :: n
     type(dllnode_t), pointer, intent(in) :: head
-    integer(DATA_KIND), allocatable :: arr(:,:)
+    type(dllnode_t), pointer :: current
 
-    integer :: i, n
+    n = 0
+    current => head
+    do
+      if (.not. associated(current)) exit
+      if (allocated(current%dat)) n = n + size(current%dat)
+      current => current % next
+    end do
+  end function dllnode_countval
+
+
+  function dllnode_export(head, starts) result(values)
+    !! Join all data from the list into a rank-1 array
+    type(dllnode_t), pointer, intent(in) :: head
+      !! Pointer to the first node in the list
+    integer, allocatable, intent(out), optional :: starts(:)
+      !! The index `starts(i)` marks the position of the first data block
+      !! in the array of values for node `i`. The last data block for the
+      !! node is at the position `starts(i+1)-1`
+      !! (or `nval` in case `i` is the last node).
+    integer(DATA_KIND), allocatable :: values(:)
+      !! Data from individual nodes placed consequently into a rank-1 array
+
+    integer :: n, nval, i, j, cval
     type(dllnode_t), pointer :: current
 
     n = dllnode_count(head)
-    allocate(arr(size(mold,1),n))
+    if (present(starts)) allocate(starts(n))
+    nval = dllnode_countval(head)
+    allocate(values(nval))
+
     current => head
-    do i = 1, n
+    j = 1
+    ALL_NODES: do i=1,n
       if (.not. associated(current)) &
-          error stop 'dllnode_export ERROR: unexpected end of chain'
-      !!!arr(:,i) = current%data
-      arr(:,i) = dllnode_read(current)
-      current => current%next
-    end do
+          error stop "dll_export - the list ended unexpectedly"
+      cval = 0
+      if (allocated(current%dat)) then
+        cval = size(current%dat)
+        values(j:j+cval-1) = current % dat
+      end if
+      if (present(starts)) starts(i) = j
+      j = j + cval
+      current => current % next
+    end do ALL_NODES
+    if (j-1 /= nval) error stop "dll_export - inconsistent counter"
   end function dllnode_export
 
 
-  function dllnode_import(arr) result(head)
-    !! Make a new chain of nodes with data from rank-2 array, return the
-    !! pointer to the head of the chain
-    integer(DATA_KIND), intent(in) :: arr(:,:)
+  function dllnode_import(values, starts) result(head)
+    !! Return pointer to a new list using arrays generated by `dllnode_export`
+    integer(DATA_KIND), intent(in) :: values(:)
+      !! Data for individual nodes placed consequently into a rank-1 array
+    integer, intent(in) :: starts(:)
+      !! The index `starts(i)` marks the position of the first data block
+      !! in the array of values for node `i`. The last data block for the
+      !! node is at the position `starts(i+1)-1`
+      !! (or `nval` in case `i` is the last node).
     type(dllnode_t), pointer :: head
+      !! Pointer to the head of new list
 
-    integer :: i, n
-    type(dllnode_t), pointer :: head1
+    integer :: nval, i, jbeg, jend
+    type(dllnode_t), pointer :: tail, new
 
-    if (size(arr,1) /= size(mold,1)) &
-        error stop 'dllnode_import ERROR: input array rows are wrong number'
-    n = size(arr,2)
+    nval = size(values)
+
     head => null()
-    do i=n,1,-1
-      call dllnode_insertinfrontof(head, dllnode_new(arr(:,i)), head1)
-      head => head1
-    end do
+    ALL_NODES: do i = 1, size(starts)
+      jbeg = starts(i)
+      if (i == size(starts)) then
+        jend = size(values)
+      else
+        jend = starts(i+1)-1
+      end if
+
+      if (jbeg > size(values)) then
+        ! special case, if there are zero-sized node(s) at the end of list:
+        ! assert this and avoid out-of-bounds indices
+        if (jend /= jbeg-1) &
+            error stop 'dll_import - assertion that the node has zero length failed'
+        jbeg = 1
+        jend = 0
+      end if
+
+      new => dllnode_new(values(jbeg:jend))
+      if (.not. associated(head)) then
+        ! this is the first node
+        head => new
+      else
+        call dllnode_insertbehind(tail, new)
+      end if
+      tail => new
+    end do ALL_NODES
+
+    if (.not. dllnode_validate(head)) &
+        error stop 'dll_import - verification of the new list failed'
   end function dllnode_import
 
 
@@ -287,12 +358,12 @@ contains
 
   subroutine dllnode_remove(what, deleted, next_in_chain)
     !! Remove **what** from chain. On return, **deleted** points to the
-    !! removed node, the node must be dealocated else-where. 
+    !! removed node, the node must be dealocated else-where.
     !! Pointer **next_in_chain** points preferentialy to the next node
     !! (if it exists), or to the prev node, or to null.
     type(dllnode_t), pointer, intent(in) :: what
     type(dllnode_t), pointer, intent(out) :: deleted, next_in_chain
- 
+
     deleted => what
     next_in_chain => null()
     if (.not. associated(what)) return
@@ -311,7 +382,7 @@ contains
     !! Remove and deallocate the whole chain starting with **first**
     !! The NEXT pointer of a node in front of **first** is also modified
     type(dllnode_t), intent(inout), pointer :: first
- 
+
     type(dllnode_t), pointer :: deleted
 
     if (.not. associated(first)) return
@@ -369,24 +440,25 @@ contains
     type(dllnode_t), pointer :: found
 
     type(dllnode_t), pointer :: current
+    integer(DATA_KIND) :: node_data(size(value))
 
-    if (size(value,1) > size(mold,1)) &
-        error stop 'dllnode_find ERROR: array size too big'
     current => start
     found => null()
     do
       if (.not. associated(current)) exit
-      associate(node_data=>dllnode_read(current))
-        !if (all(dllnode_read(current)==value)) then
-        if (all(node_data(1:size(value))==value)) then
-          found => current
-          exit
+      if (allocated(current%dat)) then
+        if (size(value)==size(current%dat)) then
+          node_data = dllnode_read(current)
+          if (all(node_data==value)) then
+            found => current
+            exit
+          end if
         end if
-      end associate
+      end if
       current => current%next
     end do
   end function dllnode_find
-  
+
 
   function dllnode_head(start) result(head)
     !! Return the pointer to the node at the head of the chain
@@ -515,7 +587,7 @@ contains
     end if
 
     ! Select a smaller value
-    if (cfun(headone%data, headtwo%data) < 0) then
+    if (cfun(headone%dat, headtwo%dat) < 0) then
       headone%next => merge0(headone%next, headtwo, cfun)
       headone%next%prev => headone
       headone%prev => null()
@@ -527,6 +599,5 @@ contains
       mergedhead => headtwo
     end if
   end function merge0
-
 
 end module dllnode_mod

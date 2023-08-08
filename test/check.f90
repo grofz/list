@@ -7,7 +7,10 @@ program test_dll
     end subroutine test2
   end interface
   call test1()
-  !call test2()
+  print *
+  print *
+  print '("===================== TEST 2 =====================")'
+  call test2()
 end program test_dll
 
 
@@ -18,7 +21,8 @@ subroutine test1()
   type(dllnode_t), pointer :: head, head1, deleted, next_in_chain, &
       found, head_b, head_c
   integer :: i
-  integer(DATA_KIND), allocatable :: data(:,:)
+  integer(DATA_KIND), allocatable :: data(:)
+  integer, allocatable :: starts(:)
   integer, parameter :: MAXN = 10
 
   ! Working with an empty list
@@ -73,18 +77,18 @@ subroutine test1()
   end do
 
   found => dllnode_find(head,win(42))
-  if (associated(found)) found => found%gonext()
+  if (associated(found)) found => found%nextnode()
   if (associated(found)) print '("After 42 is ",*(i0,1x))', wout(dllnode_read(found))
   found => dllnode_find(head,win(9))
-  if (associated(found)) found => found%goprev()
+  if (associated(found)) found => found%prevnode()
   print '("Before [9] is ",L1)', associated(found)
 
   ! Test import and copy
   print *
-  data = dllnode_export(head)
-  head_b => dllnode_t(data) ! dllnode_import
+  data = dllnode_export(head, starts)
+  head_b => dllnode_t(data, starts) ! dllnode_import
   print '("HeadB export = ",*(i0,1x))', dllnode_export(head_b)
-  
+
   print *
   found => dllnode_find(head, win(5))
   !head_c =>  dllnode_t(found) ! dllnode_copy
@@ -111,7 +115,7 @@ subroutine test1()
 
 contains
   integer function cfun_my(adat, bdat) result(ierr)
-    integer(DATA_KIND), dimension(size(mold)), intent(in) :: adat, bdat
+    integer(DATA_KIND), dimension(:), intent(in) :: adat, bdat
     integer :: a, b
     a = wout(adat)
     b = wout(bdat)
