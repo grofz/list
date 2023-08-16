@@ -26,6 +26,10 @@ module rbtrnode_mod
   integer, parameter :: MAX_SAFE_DEPTH=1000000
     !! Defensive test to avoid infinite loops in the code
 
+  public rbtrnode_insert
+  public rbtrnode_leftmost, rbtrnode_nextnode, rbtrnode_prevnode
+  public rbtrnode_read, rbtrnode_free
+
 contains
 
   ! ================================
@@ -267,8 +271,8 @@ contains
 
     leftmost => node
     do i=1,MAX_SAFE_DEPTH
-      if (.not. associated(node%left)) exit
-      leftmost => node%left
+      if (.not. associated(leftmost%left)) exit
+      leftmost => leftmost%left
     end do
 
     if (i==MAX_SAFE_DEPTH+1) &
@@ -287,8 +291,8 @@ contains
 
     rightmost => node
     do i=1,MAX_SAFE_DEPTH
-      if (.not. associated(node%right)) exit
-      rightmost => node%right
+      if (.not. associated(rightmost%right)) exit
+      rightmost => rightmost%right
     end do
 
     if (i==MAX_SAFE_DEPTH+1) &
@@ -386,5 +390,94 @@ contains
     if (i==MAX_SAFE_DEPTH+1) &
       error stop 'prevnode: MAX_SAFE_DEPTH reached, increase it if this is not error'
   end function rbtrnode_prevnode
+
+
+  ! ==============
+  ! Tree insertion
+  ! ==============
+
+  recursive subroutine rbtrnode_insert(root, new, cfun, ierr, output)
+    !* Insert a new node to the tree.
+    !  Optional pointer `output` points to the inserted node
+    !  and `ierr=0` if insertion was sucessful.
+    ! 
+    !  If duplicit node is in the tree, there are three posibililties the
+    !  error is handled:
+    !  - Error stop if `ierr` was not provided
+    !  - New node is freed here if `output` was not provided, `ierr=2` returned.
+    !  - User is responsible for freeing node via `output`, `ierr=1` returned.
+    !
+    type(rbtrnode_t), intent(inout), pointer :: root
+    type(rbtrnode_t), intent(in), pointer :: new
+    procedure(compare_fun) :: cfun
+      !! A < B -> -1, A == B -> 0, A > B -> 1
+    integer, intent(out), optional :: ierr
+      !! on exit: 0...insertion ok
+      !!          1...duplicit node in tree, node not inserted
+      !!          2...duplicit node in tree, node was deallocated automatically
+    type(rbtrnode_t), pointer, optional :: output
+      !! pointer to the new node so it can be deallocated by user, if inserion
+      !! failed
+
+    integer :: ierr0, istat
+    type(rbtrnode_t), pointer :: output0
+
+    ! assert the new node is isolated
+    if (associated(new%parent) .or. associated(new%left) .or. associated(new%right))&
+        error stop 'insert: new node must be alone'
+
+    if (.not. associated(root)) then
+      ! special case: insert node to an empty tree
+      root => new
+      if (present(ierr)) ierr = 0
+      if (present(output)) output => new
+      return
+    end if
+
+    select case(cfun(new%dat, root%dat))
+    case(-1) ! new < root
+      if (associated(root%left)) then
+        call rbtrnode_insert(root%left, new, cfun, ierr0, output0)
+      else
+        root%left => new
+        new%parent => root
+        ierr0 = 0
+      end if
+    case(+1) ! new > root
+      if (associated(root%right)) then
+        call rbtrnode_insert(root%right, new, cfun, ierr0, output0)
+      else
+        root%right => new
+        new%parent => root
+        ierr0 = 0
+      end if
+    case(0)  ! new == root
+      ierr0 = 1
+    case default
+      error stop 'insert: invalid value returned from user function'
+    end select
+
+    ! Error handling
+    if (ierr0==0) then
+      ! Insert ok
+      if (present(output)) output => new
+      if (present(ierr)) ierr = ierr0
+    else
+      if (.not. present(ierr)) then
+        ! Panic if `ierr` is not provided
+        error stop 'insert: not sucessfull as the same node is already in tree'
+      else if (.not. present(output)) then
+        ! try to deallocate new node and silently return
+        output0 => new
+        deallocate(output0, stat=istat)
+        if (istat/=0) &
+            error stop 'insert:  deallocation of duplicit node failed'
+        ierr = 2
+      else
+        ierr = ierr0
+        output => new
+      end if
+    end if
+  end subroutine rbtrnode_insert
 
 end module rbtrnode_mod

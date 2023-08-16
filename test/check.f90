@@ -1,5 +1,5 @@
 program test_dll
-  use rbtrnode_mod ! just to compile (TODO delete when actual tests exist)
+  use tree_test_mod
   implicit none
   interface
     subroutine test1()
@@ -7,6 +7,10 @@ program test_dll
     subroutine test2()
     end subroutine test2
   end interface
+
+  call tree_test_basic()
+  stop
+
   call test1()
   print *
   print *
