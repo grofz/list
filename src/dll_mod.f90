@@ -13,6 +13,7 @@ module dll_mod
   !  list
   !
   use dllnode_mod
+  use common_mod
   implicit none
   private
 

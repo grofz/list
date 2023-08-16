@@ -3,7 +3,8 @@ module user_mod
   !!
   !! Contains definition of user-types and wrapper functions
   use dll_mod
-  use dllnode_mod, only : dllnode_t, mold, DATA_KIND, dllnode_read
+  use dllnode_mod, only : dllnode_t, dllnode_read
+  use common_mod, only : mold, DATA_KIND
   implicit none
 
   integer, parameter :: MAXDIM=4
