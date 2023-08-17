@@ -5,7 +5,7 @@ vpath %.f90 test
 vpath %.f90 example
 
 FC = gfortran
-FFLAGS = -Og -std=f2018 -Wall -Wextra -pedantic -fimplicit-none -fcheck=all -fbacktrace
+FFLAGS = -ggdb -std=f2018 -Wall -Wextra -pedantic -fimplicit-none -fcheck=all -fbacktrace
 #FFLAGS = -O3 -std=f2018 -Wall -Wextra -pedantic -fimplicit-none -fbacktrace
 COMPILE = $(FC) $(FFLAGS) -c
 MAKEMOD = $(FC) $(FFLAGS) -fsyntax-only -c

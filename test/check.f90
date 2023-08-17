@@ -164,7 +164,7 @@ subroutine test2()
   ! Working with an empty list
   head => null()
   head => dllnode_reverse(head)
-  print '("Is valid an empty node ? ",L)', dllnode_validate(head)
+  print '("Is valid an empty node ? ",L2)', dllnode_validate(head)
 
 
   ! Add nodes to the list
@@ -175,18 +175,18 @@ subroutine test2()
         head1)
     head => head1
     print '("Head export = ",*(i0,1x))', dllnode_export(head)
-    print '("Is list valid? ",L)', dllnode_validate(head)
+    print '("Is list valid? ",L2)', dllnode_validate(head)
     if (i==1) then
       head => dllnode_reverse(head)
-      print '("Is list valid? ",L)', dllnode_validate(head)
+      print '("Is list valid? ",L2)', dllnode_validate(head)
       print '("After reverse = ",*(i0,1x))', dllnode_export(head)
     else if (i==2) then
       head => dllnode_reverse(head)
-      print '("Is list valid? ",L)', dllnode_validate(head)
+      print '("Is list valid? ",L2)', dllnode_validate(head)
       print '("After reverse = ",*(i0,1x))', dllnode_export(head)
     else if (i==MAXN) then
       head => dllnode_reverse(head)
-      print '("Is list valid? ",L)', dllnode_validate(head)
+      print '("Is list valid? ",L2)', dllnode_validate(head)
       print '("After reverse = ",*(i0,1x))', dllnode_export(head)
     end if
   end do
