@@ -1,4 +1,5 @@
 program test_dll
+  use tree_test_mod
   implicit none
   interface
     subroutine test1()
@@ -6,6 +7,10 @@ program test_dll
     subroutine test2()
     end subroutine test2
   end interface
+
+  call tree_test_basic()
+  stop
+
   call test1()
   print *
   print *
@@ -16,11 +21,12 @@ end program test_dll
 
 subroutine test1()
   use dllnode_mod
+  use common_mod
   implicit none
 
   type(dllnode_t), pointer :: head, head1, deleted, next_in_chain, &
       found, head_b, head_c
-  integer :: i
+  integer :: i, num_to_insert
   integer(DATA_KIND), allocatable :: data(:)
   integer, allocatable :: starts(:)
   integer, parameter :: MAXN = 10
@@ -34,10 +40,12 @@ subroutine test1()
   print '("Is valid an empty node ? ",L1)', dllnode_validate(head)
 
   ! Add nodes to the list
-  do i=1, MAXN
+  do i=1, MAXN+1
+    num_to_insert = i
+    if (i==MAXN+1) num_to_insert = 42
     call dllnode_insertinfrontof(       &
         head,                           &
-          dllnode_t(win(i)),  &
+        dllnode_t(win(num_to_insert)),  &
         head1)
     head => head1
     print '("Head export = ",*(i0,1x))', dllnode_export(head)
@@ -128,29 +136,30 @@ contains
     end if
   end function cfun_my
 
-  pure function win(a) result(data)
-    integer(DATA_KIND), allocatable :: data(:)
+  pure function win(a) result(data0)
+    integer(DATA_KIND), allocatable :: data0(:)
     integer, intent(in) :: a
-    data = transfer(a,mold)
+    data0 = transfer(a,mold)
   end function win
 
-  pure function wout(data) result(a)
-    integer(DATA_KIND), intent(in) :: data(size(mold))
+  pure function wout(data0) result(a)
+    integer(DATA_KIND), intent(in) :: data0(size(mold))
     integer :: a
-    a = transfer(data,a)
+    a = transfer(data0,a)
   end function wout
 
 end subroutine test1
 
 
 subroutine test2()
+  use common_mod
   use dllnode_mod
   implicit none
 
   type(dllnode_t), pointer :: head, head1
   integer :: i
   integer, parameter :: MAXN = 10
-  integer(DATA_KIND), allocatable :: data(:,:)
+ !integer(DATA_KIND), allocatable :: data(:,:)
 
   ! Working with an empty list
   head => null()
