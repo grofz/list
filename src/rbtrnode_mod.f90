@@ -3,6 +3,7 @@ module rbtrnode_mod
   !
   !
   use common_mod, only : DATA_KIND, mold, compare_fun
+  use iso_fortran_env, only : int8
   implicit none
   private
 
@@ -10,10 +11,12 @@ module rbtrnode_mod
     !! Red-black tree node
     private
     integer(kind=DATA_KIND), allocatable :: dat(:)
+    logical(int8) :: isblack = .false.
     type(rbtrnode_t), pointer :: left => null()
     type(rbtrnode_t), pointer :: right => null()
     type(rbtrnode_t), pointer :: parent => null()
   contains
+    procedure :: is_node_black
   end type rbtrnode_t
   interface rbtrnode_t 
     module procedure rbtrnode_new
@@ -29,8 +32,18 @@ module rbtrnode_mod
   public rbtrnode_insert
   public rbtrnode_leftmost, rbtrnode_nextnode, rbtrnode_prevnode
   public rbtrnode_read, rbtrnode_free
+  public rbtrnode_validate
 
 contains
+
+  ! ===============
+  ! Simple GETTER's
+  ! ===============
+  logical function is_node_black(this)
+    class(rbtrnode_t), intent(in) :: this
+    is_node_black = this%isblack
+  end function
+
 
   ! ================================
   ! Allocate new node (CONSTRUCTOR)
@@ -140,6 +153,15 @@ contains
   end function rbtrnode_whichchild
 
 
+  function rbtrnode_isblack(node) result(isblack)
+    !! Allow to query also null nodes (they are assumed black)
+    type(rbtrnode_t), pointer, intent(in) :: node
+    logical :: isblack
+    isblack = .true.
+    if (associated(node)) isblack = node%isblack
+  end function rbtrnode_isblack
+
+
   function rbtrnode_grandparent(node) result(grandparent)
     type(rbtrnode_t), intent(in), pointer :: node
     type(rbtrnode_t), pointer :: grandparent
@@ -194,6 +216,38 @@ contains
       if (present(parent_is_which)) parent_is_which=NO_PARENT
     end if
   end function rbtrnode_uncle
+
+
+  subroutine rehang_tree(oldchild, newchild, root)
+    type(rbtrnode_t), pointer, intent(inout) :: root
+    type(rbtrnode_t), pointer, intent(in) :: oldchild, newchild
+
+    type(rbtrnode_t), pointer :: parent
+
+    ! Old child (pivot) changed place with new child (rotator) during rotation,
+    ! repair the parent --> child link.
+    ! The other way link (child --> parent) should have been repointed during
+    ! rotation operation
+    parent => newchild%parent
+
+    if (associated(parent)) then
+      ! Assert old child was really one of parents children
+      if (associated(parent%left, oldchild)) then
+        parent%left => newchild
+      else if (associated(parent%right, oldchild)) then
+        parent%right => newchild
+      else
+        error stop 'rehang_tree - old child not recognized by parent'
+      end if
+    else
+      ! Pivot was root, and did not have any parent. Root-pointer must
+      ! be repaired instead
+      if (.not. associated(root, oldchild)) &
+          error stop 'rehang_tree - unexpected association of root pointer'
+      root => newchild
+    end if
+
+  end subroutine rehang_tree
 
 
   subroutine rotate_left(piv, rot)
@@ -392,16 +446,16 @@ contains
   end function rbtrnode_prevnode
 
 
-  ! ==============
-  ! Tree insertion
-  ! ==============
+  ! =========
+  ! Insertion
+  ! =========
 
-  recursive subroutine rbtrnode_insert(root, new, cfun, ierr, output)
+  subroutine rbtrnode_insert(root, new, cfun, ierr, new_output)
     !* Insert a new node to the tree.
-    !  Optional pointer `output` points to the inserted node
+    !  Optional pointer `new_output` points to the inserted node
     !  and `ierr=0` if insertion was sucessful.
     ! 
-    !  If duplicit node is in the tree, there are three posibililties the
+    !  If a duplicate is in the tree, there are three posibililties the
     !  error is handled:
     !  - Error stop if `ierr` was not provided
     !  - New node is freed here if `output` was not provided, `ierr=2` returned.
@@ -413,71 +467,217 @@ contains
       !! A < B -> -1, A == B -> 0, A > B -> 1
     integer, intent(out), optional :: ierr
       !! on exit: 0...insertion ok
-      !!          1...duplicit node in tree, node not inserted
-      !!          2...duplicit node in tree, node was deallocated automatically
-    type(rbtrnode_t), pointer, optional :: output
+      !!          1...duplicate in tree, node not inserted
+      !!          2...duplicate in tree, node was deallocated automatically
+    type(rbtrnode_t), pointer, optional :: new_output
       !! pointer to the new node so it can be deallocated by user, if inserion
       !! failed
+    integer, parameter :: FLAG_OK=0, FLAG_DUPLICATE=1, FLAG_DUPLICATE_FREED=2
 
-    integer :: ierr0, istat
-    type(rbtrnode_t), pointer :: output0
+    integer :: i, ierr0, which_child
+    type(rbtrnode_t), pointer :: new_local, finger
 
     ! assert the new node is isolated
     if (associated(new%parent) .or. associated(new%left) .or. associated(new%right))&
         error stop 'insert: new node must be alone'
 
+    new_local => new
+    if (present(new_output)) new_output => new
+    ierr0 = FLAG_OK
+
     if (.not. associated(root)) then
-      ! special case: insert node to an empty tree
-      root => new
-      if (present(ierr)) ierr = 0
-      if (present(output)) output => new
-      return
+      ! insert a first node to an empty tree
+      root => new_local
+      which_child = NO_PARENT
+
+    else
+      ! find place where new node will be inserted
+      finger => root
+      DOWN_LOOP: do i=1, MAX_SAFE_DEPTH
+        select case(cfun(new_local%dat, finger%dat))
+        case(-1) ! new < root
+          if (associated(finger%left)) then
+            finger => finger%left
+          else
+            which_child = LEFT_CHILD
+            exit DOWN_LOOP
+          end if
+        case(+1) ! new > root
+          if (associated(finger%right)) then
+            finger => finger%right
+          else
+            which_child = RIGHT_CHILD
+            exit DOWN_LOOP
+          end if
+        case(0)  ! new == root
+          ierr0 = FLAG_DUPLICATE
+          exit DOWN_LOOP
+        case default
+          error stop 'insert: invalid value returned from user function'
+        end select
+      end do DOWN_LOOP
+      if (i==MAX_SAFE_DEPTH+1) &
+        error stop 'insert: MAX_SAFE_DEPTH reached, increase it if this is not error'
     end if
 
-    select case(cfun(new%dat, root%dat))
-    case(-1) ! new < root
-      if (associated(root%left)) then
-        call rbtrnode_insert(root%left, new, cfun, ierr0, output0)
-      else
-        root%left => new
-        new%parent => root
-        ierr0 = 0
+    ! Insert node or handle duplicates error
+    if (ierr0 == FLAG_OK) then
+      if (which_child == LEFT_CHILD) then
+        finger%left => new_local
+      else if (which_child == RIGHT_CHILD) then
+        finger%right => new_local
       end if
-    case(+1) ! new > root
-      if (associated(root%right)) then
-        call rbtrnode_insert(root%right, new, cfun, ierr0, output0)
-      else
-        root%right => new
-        new%parent => root
-        ierr0 = 0
-      end if
-    case(0)  ! new == root
-      ierr0 = 1
-    case default
-      error stop 'insert: invalid value returned from user function'
-    end select
+      if (which_child /= NO_PARENT) new_local%parent => finger
 
-    ! Error handling
-    if (ierr0==0) then
-      ! Insert ok
-      if (present(output)) output => new
-      if (present(ierr)) ierr = ierr0
-    else
+    else if (ierr0 == FLAG_DUPLICATE) then
       if (.not. present(ierr)) then
         ! Panic if `ierr` is not provided
         error stop 'insert: not sucessfull as the same node is already in tree'
-      else if (.not. present(output)) then
+      else if (.not. present(new_output)) then
         ! try to deallocate new node and silently return
-        output0 => new
-        deallocate(output0, stat=istat)
-        if (istat/=0) &
-            error stop 'insert:  deallocation of duplicit node failed'
-        ierr = 2
-      else
-        ierr = ierr0
-        output => new
+        call rbtrnode_free(new_local)
+        ierr0 = FLAG_DUPLICATE_FREED
       end if
+    else
+      error stop 'insert: unreachable branch'
+    end if
+    if (present(ierr)) ierr = ierr0
+
+    ! Repair red-black tree
+    if (ierr0==FLAG_OK) then
+      new_local%isblack = .false. ! inserted node is red
+      call insert_repair(new_local, root)
     end if
   end subroutine rbtrnode_insert
+
+
+  recursive subroutine insert_repair(n, root)
+    type(rbtrnode_t), intent(inout), pointer :: n, root
+
+    type(rbtrnode_t), pointer :: p, u, g, rot
+    logical :: uncle_exists, uncle_is_red
+
+    if (.not. associated(n)) &
+      error stop 'insert_repair: n is null node'
+
+    p => n%parent
+    MAIN: if (.not. associated(p)) then
+      ! CASE I - root node must be black
+      n%isblack = .true.
+      if (.not. associated(root,n)) &
+          error stop 'node n seems to be root, but root points elsewhere'
+
+    else if (p%isblack) then MAIN
+      ! CASE II - nothing has to be done
+      continue
+
+    else MAIN
+      ! parent is red
+      u => rbtrnode_uncle(n)
+      uncle_exists = associated(u)
+      uncle_is_red = .false.
+      if (uncle_exists) uncle_is_red = .not. u%isblack
+
+      RED_PARENT: if (uncle_exists .and. uncle_is_red) then
+        ! CASE III - repaint parent and uncle black and repair grandparent
+        g => rbtrnode_grandparent(n)
+        p%isblack = .true.
+        u%isblack = .true.
+        g%isblack = .false.
+        call insert_repair(g, root)
+      else RED_PARENT
+
+        ! CASE IV - parent is red and uncle is black
+        g => rbtrnode_grandparent(n)
+
+        ! case 4, step 1
+        if (rbtrnode_whichchild(n) == RIGHT_CHILD .and. &
+            rbtrnode_whichchild(p) == LEFT_CHILD) then
+
+           call rotate_left(p, rot)
+if (.not. associated(rot,n)) error stop 'repair: unexpected'
+           call rehang_tree(p, rot, root)
+           n => p
+
+        else if (rbtrnode_whichchild(n) == LEFT_CHILD .and. &
+                 rbtrnode_whichchild(p) == RIGHT_CHILD) then
+
+           call rotate_right(p, rot)
+if (.not. associated(rot,n)) error stop 'repair: unexpected'
+           call rehang_tree(p, rot, root)
+           n => p
+        end if
+
+        ! case 4, step 2
+        p => n%parent
+        g => rbtrnode_grandparent(n)
+
+        if (rbtrnode_whichchild(n)==LEFT_CHILD) then
+          call rotate_right(g, rot)
+          call rehang_tree(g, rot, root)
+
+        else if (rbtrnode_whichchild(n)==RIGHT_CHILD) then
+          call rotate_left(g, rot)
+          call rehang_tree(g, rot, root)
+
+        else
+          error stop 'case 4, part 2, unreachable branch'
+        end if
+        p%isblack = .true.
+        g%isblack = .false.
+      end if RED_PARENT
+
+    end if MAIN
+
+  end subroutine insert_repair
+
+
+  ! ================================
+  ! Validation and debugging helpers
+  ! ================================
+
+  recursive subroutine rbtrnode_validate(root, cfun, isvalid, nblacks)
+    type(rbtrnode_t), intent(in), pointer :: root
+    procedure(compare_fun) :: cfun
+    logical, intent(out) :: isvalid
+    integer, intent(out) :: nblacks
+
+    logical :: isvalid_left, isvalid_right, isvalid_bst
+    integer :: nblacks_left, nblacks_right
+
+    ! empty tree is a valid tree
+    if (.not. associated(root)) then
+      isvalid = .true.
+      nblacks = 1 ! leaf node is assumed black
+      return
+    end if
+
+    ! validate left and right sub-trees
+    call rbtrnode_validate(root%left, cfun, isvalid_left, nblacks_left)
+    call rbtrnode_validate(root%right, cfun, isvalid_right, nblacks_right)
+    isvalid = isvalid_left .and. isvalid_right
+
+    ! assert red-node has only black children
+    if (.not. root%isblack) isvalid = isvalid .and. &
+        rbtrnode_isblack(root%left) .and. rbtrnode_isblack(root%right)
+
+    ! assert children point back at parent node
+    if (associated(root%left))  isvalid = isvalid .and. associated(root%left%parent, root)
+    if (associated(root%right)) isvalid = isvalid .and. associated(root%right%parent, root)
+
+    ! assert that number of black nodes is same in both sub-trees
+    isvalid = isvalid .and. (nblacks_left == nblacks_right)
+    nblacks = nblacks_left
+    if (rbtrnode_isblack(root)) nblacks = nblacks + 1
+
+    ! assert binary search tree data are in correct order
+    isvalid_bst = .true.
+    if (associated(root%left)) isvalid_bst = isvalid_bst .and. &
+        cfun(rbtrnode_read(root%left), rbtrnode_read(root)) == -1
+    if (associated(root%right)) isvalid_bst = isvalid_bst .and. &
+        cfun(rbtrnode_read(root), rbtrnode_read(root%right)) == -1
+    isvalid = isvalid .and. isvalid_bst
+
+  end subroutine rbtrnode_validate
 
 end module rbtrnode_mod
