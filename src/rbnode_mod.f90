@@ -52,6 +52,10 @@ module rbnode_mod
   public rbnode_validate, rbnode_blackheight
   public join
 
+  integer, public, save :: allocation_counter = 0
+    !! temporary, just for mem.leakage debuging TODO
+
+
 contains
 
   ! ==============
@@ -103,6 +107,7 @@ contains
 
     integer :: ierr
 
+allocation_counter=allocation_counter+1
     allocate(new, stat=ierr)
     if (ierr /= 0) &
         error stop 'could not allocate new rbtr node'
@@ -124,6 +129,7 @@ contains
 
     integer :: ierr
 
+allocation_counter=allocation_counter+1
     allocate(new, stat=ierr)
     if (ierr /= 0) &
         error stop 'could not allocate new rbtr node'
@@ -193,6 +199,7 @@ contains
     deallocate(deleted, stat=ierr)
     if (ierr /= 0) &
         error stop 'could not free node: node deallocation failed'
+allocation_counter=allocation_counter-1
   end subroutine rbnode_free
 
 
@@ -1013,31 +1020,38 @@ contains
   ! Set operations (experimental)
   ! =============================
 
+  ! Ideas for improvement TODO
+  ! Note: when joining, the recursive algorithm allocates and deallocates
+  ! the nodes / I would like to find a way to avoid it and reuse the space
+
   recursive function join_right(tl, key, tr) result(newroot)
     type(rbnode_t), intent(in), pointer :: tl, tr
     integer(DATA_KIND), intent(in) :: key(:)
     type(rbnode_t), pointer :: newroot
 
     type(rbbasetree_t) :: t
-    type(rbnode_t), pointer :: tmp
+    type(rbnode_t), pointer :: old
+    logical(int8) :: tl_isblack
 
     if (tl%isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
       newroot => rbnode_t(tl, key, RED_COLOUR, tr)
       return
     end if
 
+    tl_isblack = rbnode_isblack(tl)
+    old => tl
     t%root => rbnode_t(tl%left, rbnode_read(tl), tl%isblack, &
         join_right(tl%right, key, tr))
+    call rbnode_free(old)
 
-    if (rbnode_isblack(tl) .and. &
+    if (tl_isblack .and. &
        ((rbnode_isblack(t%root%right) .eqv. RED_COLOUR) .and. &
         (rbnode_isblack(t%root%right%right) .eqv. RED_COLOUR))) then
       t%root%right%right%isblack = BLACK_COLOUR
-      tmp => rotate_left(t%root, t)
-      newroot => tmp
-      return
+      newroot => rotate_left(t%root, t)
+    else
+      newroot => t%root
     end if
-    newroot => t%root
   end function join_right
 
 
@@ -1047,9 +1061,28 @@ contains
     type(rbnode_t), pointer :: newroot
 
     type(rbbasetree_t) :: t
-    type(rbnode_t), pointer :: tmp
+    type(rbnode_t), pointer :: old
+    logical(int8) :: tr_isblack
 
-    stop 'not ready'
+    if (tr%isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
+      newroot => rbnode_t(tl, key, RED_COLOUR, tr)
+      return
+    end if
+
+    tr_isblack = rbnode_isblack(tr)
+    old => tr
+    t%root => rbnode_t(join_left(tl, key, tr%left), &
+        rbnode_read(tr), tr%isblack, tr%right)
+    call rbnode_free(old)
+
+    if (tr_isblack .and. &
+       ((rbnode_isblack(t%root%left) .eqv. RED_COLOUR) .and. &
+        (rbnode_isblack(t%root%left%left) .eqv. RED_COLOUR))) then
+      t%root%left%left%isblack = BLACK_COLOUR
+      newroot => rotate_right(t%root, t)
+    else
+      newroot => t%root
+    end if
   end function join_left
 
 
@@ -1058,22 +1091,33 @@ contains
     integer(DATA_KIND), intent(in) :: key(:)
     type(rbnode_t), pointer :: newroot
 
-    type(rbbasetree_t) :: t
+    if (.not. associated(tl)) then
+      newroot => tr
+      print '("Join - Left tree is empty")'
+      return
+    else if (.not. associated(tr)) then
+      print '("Join - Right tree is empty")'
+      newroot => tl
+      return
+    end if
 
     if (rbnode_blackheight(tl) > rbnode_blackheight(tr)) then
-      t%root => join_right(tl, key, tr)
-      if ((rbnode_isblack(t%root) .eqv. RED_COLOUR) .and. &
-          (rbnode_isblack(t%root%right) .eqv. RED_COLOUR )) then
-        t%root%isblack = BLACK_COLOUR
-      end if
-      newroot => t%root
+      newroot => join_right(tl, key, tr)
+      if ((rbnode_isblack(newroot) .eqv. RED_COLOUR) .and. &
+          (rbnode_isblack(newroot%right) .eqv. RED_COLOUR )) &
+          newroot%isblack = BLACK_COLOUR
       return
     end if
 
     if (rbnode_blackheight(tl) < rbnode_blackheight(tr)) then
-      stop 'not ready'
+      newroot => join_left(tl, key, tr)
+      if ((rbnode_isblack(newroot) .eqv. RED_COLOUR) .and. &
+          (rbnode_isblack(newroot%left) .eqv. RED_COLOUR )) &
+          newroot%isblack = BLACK_COLOUR
+      return
     end if
 
+    ! both trees have the same black height
     if ((rbnode_isblack(tl) .eqv. BLACK_COLOUR) .and. &
         (rbnode_isblack(tr) .eqv. BLACK_COLOUR)) then
       newroot => rbnode_t(tl,key,RED_COLOUR,tr)

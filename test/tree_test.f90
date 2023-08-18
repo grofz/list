@@ -6,27 +6,39 @@ module tree_test_mod
 contains
 
   subroutine tree_test_join()
-    integer, parameter, dimension(*) :: dat_a=[1, 5, 6, 7, 8, 11, 12, 13, 15, 17, 19, 2, 3, 4, 9]
-    integer, parameter, dimension(*) :: dat_b=[21, 25, 27, 35]
     type(rbbasetree_t) :: tree_a, tree_b, tree_ab
     integer :: i, ierr
+    integer, parameter :: NMID=4988099, NRIGHT=5000000
 
-    do i=1, size(dat_a)
-      call rbnode_insert(tree_a, rbnode_t(transfer(dat_a(i),mold)), tree_test_basic_comp, ierr)
+    do i=1, NMID-1
+      call rbnode_insert(tree_a, rbnode_t(transfer(i,mold)), tree_test_basic_comp)
+    end do
+    print '("Insertion L - Valid? ",L2," black height is ",i0)', &
+        tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
+
+    do i=NMID+1, NRIGHT
+      call rbnode_insert(tree_b, rbnode_t(transfer(i,mold)), tree_test_basic_comp, ierr)
       if (ierr/=0) print *, 'Insert ierr = ',ierr
     end do
-    print '("Is tree valid after inserion?",L2)', tree_a%isvalid(tree_test_basic_comp)
-    do i=1, size(dat_b)
-      call rbnode_insert(tree_b, rbnode_t(transfer(dat_b(i),mold)), tree_test_basic_comp, ierr)
-      if (ierr/=0) print *, 'Insert ierr = ',ierr
-    end do
-    print '("Is tree valid after inserion?",L2)', tree_b%isvalid(tree_test_basic_comp)
-    call dump_graphviz('our_a', tree_a)
-    call dump_graphviz('our_b', tree_b)
+    print '("Insertion R - Valid? ",L2," black height is ",i0)', &
+        tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
 
-    tree_ab%root => join(tree_a%root, transfer(20,mold), tree_b%root)
-    print '("Is tree valid after join?",L2)', tree_ab%isvalid(tree_test_basic_comp)
-    call dump_graphviz('our_ab', tree_ab)
+    !call dump_graphviz('our_a', tree_a)
+    !call dump_graphviz('our_b', tree_b)
+
+    tree_ab%root => join(tree_a%root, transfer(NMID,mold), tree_b%root)
+    print '("Join L+R    - Valid? ",L2," black height is ",i0)', &
+        tree_ab%isvalid(tree_test_basic_comp), tree_ab%blackheight()
+
+    !call dump_graphviz('our_ab', tree_ab)
+
+    ! Delete everything
+    do i=1,NRIGHT
+      call rbnode_delete(tree_ab, rbnode_find(tree_ab%root, transfer(i,mold), tree_test_basic_comp))
+    end do
+    print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
+        tree_ab%isvalid(tree_test_basic_comp), tree_ab%blackheight()
+    print *, 'Allocated nodes zero?  =', allocation_counter
 
   end subroutine tree_test_join
 
@@ -90,6 +102,7 @@ contains
     character(len=*), intent(in) :: basename
     type(rbbasetree_t), intent(in) :: tree
 
+    character(len=*), parameter :: SUFTXT='gv.txt', SUFPNG='.png'
     integer :: fid, cmdstat, exitstat
     character(len=200) cmdmsg
 
@@ -98,12 +111,13 @@ contains
       return
     end if
 
-    open(newunit=fid, file=basename//'.gv.txt', status='replace')
+    ! open a temporary file
+    open(newunit=fid, file=basename//SUFTXT, status='replace')
     write(fid,'(a,/,a)') 'digraph {','node [fontname="Arial"];'
     call visit_nodes(tree%root, fid)
     write(fid,'(a)') '}'
     flush(fid)
-    call execute_command_line('dot -Tpng < '//basename//'.gv.txt'//' > '//basename//'.png', &
+    call execute_command_line('dot -Tpng < '//basename//SUFTXT//' > '//basename//SUFPNG, &
         exitstat=exitstat, cmdstat=cmdstat, cmdmsg=cmdmsg)
     if (exitstat/=0 .or. cmdstat/=0) print *, exitstat, cmdstat, cmdmsg
     close(fid, status='delete')
