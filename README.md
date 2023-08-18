@@ -1,6 +1,6 @@
 # List
 
-An easy-to-use Fortran list implementation.
+An easy-to-use Fortran list (and trees)library
 
 ## Introduction
 
@@ -8,9 +8,10 @@ This is work in progress.
 
 At the moment, the following modules are provided:
 
-* 'dllnode_mod' to work with individual nodes of double-linked list
-* `dll_mod' to work with double-linked lists using the Python-like
+* `dllnode_mod` to work with individual nodes of double-linked list
+* `dll_mod` to work with double-linked lists using the Python-like
    methods
+* `rbnode_mode` to work with Red-Black trees
 
 In the future, I intend to move here single linked list and other
 containers (trees, etc.).

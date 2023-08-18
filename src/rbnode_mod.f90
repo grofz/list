@@ -23,6 +23,7 @@ module rbnode_mod
   contains
     procedure :: is_node_black
     procedure :: leftnode, rightnode, upnode
+    procedure :: nextnode => nextnode_tbp
   end type rbnode_t
   interface rbnode_t
     module procedure rbnode_new
@@ -42,8 +43,9 @@ module rbnode_mod
     !! Defensive test to avoid infinite loops in the code
 
   public rbnode_update, rbnode_read, rbnode_free
-  public rbnode_insert
+  public rbnode_find
   public rbnode_leftmost, rbnode_nextnode, rbnode_prevnode
+  public rbnode_insert, rbnode_delete
   public rbnode_validate
 
 contains
@@ -73,6 +75,14 @@ contains
     type(rbnode_t), pointer :: un
     un => this%parent
   end function
+
+  function nextnode_tbp(this) result(nn)
+    class(rbnode_t), intent(in), target :: this
+    type(rbnode_t), pointer :: nn
+    nn => this
+    nn => rbnode_nextnode(nn)
+  end function
+! TODO prevnode, leftmost?, rightmost?
 
 
   ! ================================
@@ -147,6 +157,7 @@ contains
 
     if (.not. associated(deleted)) &
         error stop 'could not free node: null pointer'
+    ierr = 0
     if (allocated(deleted%dat)) deallocate(deleted%dat, stat=ierr)
     if (ierr /= 0) &
         error stop 'could not free node: data deallocation failed'
@@ -481,6 +492,36 @@ contains
   end function rbnode_prevnode
 
 
+  function rbnode_find(start, val, cfun) result(found)
+    type(rbnode_t), intent(in), pointer :: start
+    integer(DATA_KIND), intent(in) :: val(:)
+    procedure(compare_fun) :: cfun
+    type(rbnode_t), pointer :: found
+
+    type(rbnode_t), pointer :: finger
+    integer :: i
+
+    found => null()
+    finger => start
+    do i=1, MAX_SAFE_DEPTH
+      if (.not. associated(finger)) exit
+      select case(cfun(val, finger%dat))
+      case(-1) ! val < finger
+        finger => finger%left
+      case(+1) ! val > finger
+        finger => finger%right
+      case(0)  ! val == finger
+        found => finger
+        exit
+      case default
+        error stop 'find: invalid value returned from user function'
+      end select
+    end do
+    if (i==MAX_SAFE_DEPTH+1) &
+        error stop 'find: MAX_SAFE_DEPTH reached, incr. it if this is not error'
+  end function rbnode_find
+
+
   ! =========
   ! Insertion
   ! =========
@@ -513,6 +554,8 @@ contains
     type(rbnode_t), pointer :: new_local, finger
 
     ! assert the new node is isolated
+    if (.not. associated(new)) &
+        error stop 'insert: new node is null node'
     if (associated(new%parent) .or. associated(new%left) .or. associated(new%right))&
         error stop 'insert: new node must be alone'
 
@@ -655,6 +698,286 @@ contains
     end if MAIN
 
   end subroutine insert_repair
+
+
+  ! ========
+  ! Deletion
+  ! ========
+
+  subroutine rbnode_delete(tree, what, ierr, deleted_output)
+    !* Remove (and maybe free) a node from the tree.
+    !  Optional pointer `deleted_output` points to the deleted node
+    !  in the case user wants to take responsibility for freeing the node.
+    !  If `deleted_output` is not provided, the node is freed here.
+    !
+    class(rbbasetree_t), intent(inout) :: tree
+    type(rbnode_t), pointer, intent(in) :: what
+    integer, optional, intent(out) :: ierr
+    type(rbnode_t), pointer, intent(out), optional :: deleted_output
+
+    integer :: ierr0
+    type(rbnode_t), pointer :: n, ch
+    integer(kind=DATA_KIND), allocatable :: tmp_dat(:)
+
+    if (.not. associated(what)) &
+        error stop 'delete: what is null node'
+      ! TODO for now we panic if the deleted node does not exist
+      !      later allow to exit quietly?
+
+    n => what
+
+
+    ! CASE I: N has two children
+    ! * find the successor node, move content of that node to the current
+    !   node to be deleted and then delete the successor node
+    ! * continue to the CASE II (one or zero children)
+    if (associated(n%left) .and. associated(n%right)) then
+      ch => rbnode_leftmost(n%right)
+      if (present(deleted_output)) then
+        ! swap n%dat and ch%dat
+        call move_alloc(n%dat, tmp_dat)
+        call move_alloc(ch%dat, n%dat)
+        call move_alloc(tmp_dat, ch%dat)
+      else
+        ! just move ch%dat, n%dat can be discarded
+        call move_alloc(ch%dat, n%dat)
+      end if
+      n => ch
+    else
+      continue
+    endif
+
+
+    ! CASE II: N has one or zero children:
+    ! * If N is red, both its children must be leafs.
+    !   Node can be removed without violating red-black properties.
+    ! * If N is black and its child CH is red, then N can be replaced by
+    !   CH, CH is relabeled black and we are done.
+    ! * If N is black with no children, removing N will break the
+    !   red-black tree properties and it must be rebalanced in
+    !   "delete_case1" subroutines.
+    if (associated(n%left)) then
+      ch => n%left
+    elseif (associated(n%right)) then
+      ch => n%right
+    else
+      ch => null()
+    endif
+
+    if (.not. associated(ch)) then
+      ! N has no children
+      if (n%isblack) call delete_case1(tree, n)
+
+      ! N is red
+      if (.not. associated(n%parent)) then
+        ! N was root
+        tree%root => null()
+      elseif (rbnode_whichchild(n)==LEFT_CHILD) then
+        n%parent%left => null()
+      elseif (rbnode_whichchild(n)==RIGHT_CHILD) then
+        n%parent%right => null()
+      else
+        error stop 'Delete: impossible branch'
+      endif
+
+    else
+      ! N has one child (N must be black and CH must be red)
+      ch % parent => n % parent
+      if (.not. associated(n%parent)) then
+        ! N was root, CH is new root
+        tree%root => ch
+      elseif (rbnode_whichchild(n)==LEFT_CHILD) then
+        n%parent%left => ch
+      elseif (rbnode_whichchild(n)==RIGHT_CHILD) then
+        n%parent%right => ch
+      else
+        error stop 'Delete: impossible branch2'
+      endif
+
+      ! Assert N is black and CH is red
+      !if (.not. n%isblack .and. .not. ch%isblack) then
+      if (.not. (n%isblack .and. .not. ch%isblack)) then
+        error stop "delete: assertion failed"
+      endif
+
+      ch%isblack = .true.
+    endif
+
+
+    ! Now N can be deallocated
+    if (present(deleted_output)) then
+      deleted_output => n
+    else
+      call rbnode_free(n)
+    end if
+  end subroutine rbnode_delete
+
+
+  recursive subroutine delete_case1(tree, m)
+    class(rbbasetree_t), intent(inout) :: tree
+    type(rbnode_t), pointer, intent(in) :: m
+!
+! M is a black node without children.
+! If M is the new root, nothing needs to be done.
+! Otherwise proceed to case 2.
+!
+    if (associated(m%parent)) call delete_case2(tree, m)
+  end subroutine delete_case1
+
+
+  recursive subroutine delete_case2(tree, m)
+    class(rbbasetree_t), intent(inout) :: tree
+    type(rbnode_t), pointer, intent(in) :: m
+!
+! If S is red:
+! * make S black, make P red and
+! * rotate left/right around P so S will become grandparent of M
+!
+    type(rbnode_t), pointer :: s, p, tmp
+
+    s => rbnode_sibling(m)
+    p => m%parent
+
+    if (.not. rbnode_isblack(s)) then
+      p%isblack = .false. ! red_node
+      s%isblack = .true.  ! black_node
+      if (rbnode_whichchild(m)==LEFT_CHILD) then
+        tmp => rotate_left(p, tree)
+      else
+        tmp => rotate_right(p, tree)
+      endif
+    endif
+    call delete_case34(tree, m)
+  end subroutine delete_case2
+
+
+  recursive subroutine delete_case34(tree, m)
+    class(rbbasetree_t), intent(inout) :: tree
+    type(rbnode_t), pointer, intent(in) :: m
+!
+! If S, Sleft, Sright and P are black then
+! * repaint S red: this compensates the deleted black node in S' subtree
+!                  but the whole P->M and P->S sub-trees are one black node
+!                  less than the remaining branches, therefore ...
+! * rebalance up-level: use delete_case1 on P
+!
+! If S, Sleft and Sright are black but P is red then
+! * exchange color of S and P and we are done
+!
+! Otherwise proceed to delete_case5
+!
+    type(rbnode_t), pointer :: s, p
+
+    s => rbnode_sibling(m)
+    p => m%parent
+
+    ! assert that sibling is not leaf
+    if (.not. associated(s)) &
+    &   error stop "delete_case34: defensive check, sibling is a leaf:"
+
+    if (p%isblack .and. s%isblack .and. &
+    &   rbnode_isblack(s%left) .and. rbnode_isblack(s%right)) then
+      s%isblack = .false. ! red_node
+      call delete_case1(tree, p)
+
+    elseif ( .not. p%isblack .and. s%isblack .and. &
+    &   rbnode_isblack(s%left) .and. rbnode_isblack(s%right)) then
+      s%isblack = .false. ! red_node
+      p%isblack = .true.  ! black_node
+
+    else
+      call delete_case5(tree, m)
+    endif
+  end subroutine delete_case34
+
+
+  subroutine delete_case5(tree, m)
+    class(rbbasetree_t), intent(inout) :: tree
+    type(rbnode_t), pointer, intent(in) :: m
+!
+! S is black, S left is red, S right is black and M is the left child
+! * rotate right at S so S left is new sibling of M
+! * exchange colors of S and its ne parent (it was S left)
+!
+! Mirrored situation
+! S is black, S right is red, S left is black and M is the right child
+! * rotate left at S so S right is new sibling of M
+! * exchange colort of S and its new parent (it was S right)
+!
+! At the enf M should have black sibling with red children on the
+! outside of the tree and this falls into case 6
+!
+    type(rbnode_t), pointer :: s, tmp
+
+    s => rbnode_sibling(m)
+    ! assert that sibling is not leaf
+    if (.not. associated(s)) &
+    &   error stop "delete_case5: defensive check, sibling is a leaf:"
+
+    ! assert that sibling is black
+    if (.not. s%isblack) &
+    &   error stop "delete_case5: sibling is red"
+
+    if (rbnode_whichchild(m)==LEFT_CHILD .and. rbnode_isblack(s%right)) then
+      ! assert S left is red
+      if (rbnode_isblack(s%left)) error stop "delete_case5: assert1"
+
+      s%isblack      = .false. ! red_node
+      s%left%isblack = .true.  ! black_node
+      tmp => rotate_right(s, tree)
+
+    elseif (rbnode_whichchild(m)==RIGHT_CHILD .and. rbnode_isblack(s%left)) then
+      ! assert S right is red
+      if (rbnode_isblack(s%right)) error stop "delete_case5: assert2"
+
+      s%isblack      = .false. ! red_node
+      s%right%isblack = .true.  ! black_node
+      tmp => rotate_left(s, tree)
+    endif
+
+    call delete_case6(tree, m)
+  end subroutine delete_case5
+
+
+  subroutine delete_case6(tree, m)
+    class(rbbasetree_t), intent(inout) :: tree
+    type(rbnode_t), pointer, intent(in) :: m
+!
+! If S is black, its right child is red and M is the left child then
+! * rotate left at P so S becomes the parent of P and S's right child
+! * exchange colors P and S and make S's right child black
+!
+! Mirrored situation
+! If S is black, its left child is red and M is the right child then
+! * rotate right at P so S becomes the parent of P and S's left child
+! * exchange colors P and S and make S's left child black
+!
+! The properties of red-black tree are now restored
+!
+    type(rbnode_t), pointer :: s, p, tmp
+
+    s => rbnode_sibling(m)
+    p => m%parent
+
+    ! assert that sibling is not leaf
+    if (.not. associated(s)) &
+    &   error stop "delete_case6: defensive check, sibling is a leaf:"
+
+    if (rbnode_isblack(p)) then
+      s%isblack = .true.  ! black_node
+    else
+      s%isblack = .false. ! red_node
+    endif
+    p%isblack = .true.    ! black_node
+
+    if (rbnode_whichchild(m)==LEFT_CHILD) then
+      s%right%isblack = .true. ! black_node
+      tmp => rotate_left(p, tree)
+    else
+      s%left%isblack = .true.  ! black_node
+      tmp => rotate_right(p, tree)
+    endif
+  end subroutine delete_case6
 
 
   ! ================================

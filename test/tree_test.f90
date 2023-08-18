@@ -7,6 +7,7 @@ contains
 
   subroutine tree_test_basic()
     integer, parameter, dimension(*) :: DATA=[10, 5, 7, 8, 9, 11, 12, 13]
+   !integer, parameter :: NSIZE = 1025
     integer, parameter :: NSIZE = 150000
 
     type(rbnode_t), pointer :: current, output
@@ -27,15 +28,27 @@ contains
                            tree_test_basic_comp, ierr)
       if (ierr/=0) print *, 'Insert ierr = ',ierr
     end do
+    print '("Is tree valid after inserion?",L2)', &
+      tree%isvalid(tree_test_basic_comp)
 
     ! traversing
     current=>rbnode_leftmost(tree%root)
     do
       if (.not. associated(current)) exit
-      !write(*,'(i0,l2,2x)',advance='no') transfer(rbnode_read(current),i), current%is_node_black()
-      current => rbnode_nextnode(current)
+     !write(*,'(i0,l2,2x)',advance='no') transfer(rbnode_read(current),i), current%is_node_black()
+      current => current%nextnode()
     end do
     write(*,*)
+
+    ! Deletion
+    do i=1, size(y2)
+      call rbnode_delete(tree, rbnode_find(tree%root, &
+        transfer(y2(i),mold), tree_test_basic_comp) )
+      if (mod(i,10000)/=0) cycle
+      isvalid = tree%isvalid(tree_test_basic_comp)
+      !print *, 'removed ',y2(i), isvalid
+      if (.not. isvalid) stop 'tree is not valid'
+    end do
 
     ! Root is
     if (associated(tree%root)) then
@@ -43,11 +56,12 @@ contains
     else
       print *, "Root is null:"
     end if
+
     ! Validation
     call rbnode_validate(tree%root, tree_test_basic_comp, isvalid, nblacks)
     print '("Is tree valid ?",L2, " black nodes count = ",i0)',isvalid, nblacks
 
-    print '("Is tree valid ?",L2)', tree%isvalid(tree_test_basic_comp)
+
 
   end subroutine
 

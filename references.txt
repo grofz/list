@@ -3,3 +3,5 @@ Markdown: https://www.markdowntutorial.com/
 FORD: https://forddocs.readthedocs.io/en/latest/
 
 Sorting linked-list: https://www.geeksforgeeks.org/merge-sort-for-linked-list/
+
+Red-black tree: https://en.wikipedia.org/wiki/Red%E2%80%93black_tree
