@@ -1,6 +1,6 @@
 module tree_test_mod
   use common_mod, only : mold, DATA_KIND
-  use rbtrnode_mod
+  use rbnode_mod
   implicit none
 
 contains
@@ -9,44 +9,45 @@ contains
     integer, parameter, dimension(*) :: DATA=[10, 5, 7, 8, 9, 11, 12, 13]
     integer, parameter :: NSIZE = 150000
 
-    type(rbtrnode_t), pointer :: root, current, output
+    type(rbnode_t), pointer :: current, output
+    type(rbbasetree_t) :: tree
     integer :: ierr, i, nblacks
     integer, allocatable :: y1(:), y2(:)
     logical :: isvalid
-
-    root => null()
 
     y1 = get_array(NSIZE)
     y2 = shuffle_array(y1)
 
     do i=1, size(y2)
-      !call rbtrnode_insert(root, &
-      !                     rbtrnode_t(transfer(DATA(i),mold)), &
+      !call rbnode_insert(root, &
+      !                     rbnode_t(transfer(DATA(i),mold)), &
       !                     tree_test_basic_comp, ierr)
-      call rbtrnode_insert(root, &
-                           rbtrnode_t(transfer(y2(i),mold)), &
+      call rbnode_insert(tree, &
+                           rbnode_t(transfer(y2(i),mold)), &
                            tree_test_basic_comp, ierr)
       if (ierr/=0) print *, 'Insert ierr = ',ierr
     end do
 
     ! traversing
-    current=>rbtrnode_leftmost(root)
+    current=>rbnode_leftmost(tree%root)
     do
       if (.not. associated(current)) exit
-      !write(*,'(i0,l2,2x)',advance='no') transfer(rbtrnode_read(current),i), current%is_node_black()
-      current => rbtrnode_nextnode(current)
+      !write(*,'(i0,l2,2x)',advance='no') transfer(rbnode_read(current),i), current%is_node_black()
+      current => rbnode_nextnode(current)
     end do
     write(*,*)
 
     ! Root is
-    if (associated(root)) then
-      print *, "Root is: ", transfer(rbtrnode_read(root),i), root%is_node_black()
+    if (associated(tree%root)) then
+      print *, "Root is: ", transfer(rbnode_read(tree%root),i), tree%root%is_node_black()
     else
       print *, "Root is null:"
     end if
     ! Validation
-    call rbtrnode_validate(root, tree_test_basic_comp, isvalid, nblacks)
-    print '("Is tree valid ?",L2, " black nodes count = ",i0)',isvalid, nblacks 
+    call rbnode_validate(tree%root, tree_test_basic_comp, isvalid, nblacks)
+    print '("Is tree valid ?",L2, " black nodes count = ",i0)',isvalid, nblacks
+
+    print '("Is tree valid ?",L2)', tree%isvalid(tree_test_basic_comp)
 
   end subroutine
 
