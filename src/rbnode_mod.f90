@@ -26,7 +26,7 @@ module rbnode_mod
     procedure :: nextnode => nextnode_tbp
   end type rbnode_t
   interface rbnode_t
-    module procedure rbnode_new
+    module procedure rbnode_new, rbnode_newroot
     !module procedure rbnode_import
     !module procedure rbnode_copy
   end interface
@@ -35,9 +35,12 @@ module rbnode_mod
     type(rbnode_t), pointer :: root => null()
   contains
     procedure :: isvalid => rbbasetree_isvalid
+    procedure :: blackheight => rbbasetree_blackheight
   end type rbbasetree_t
 
   integer, parameter :: LEFT_CHILD=1, RIGHT_CHILD=2, NO_PARENT=0
+  logical(int8), parameter :: RED_COLOUR=.false.,BLACK_COLOUR=.true.
+
 
   integer, parameter :: MAX_SAFE_DEPTH=1000000
     !! Defensive test to avoid infinite loops in the code
@@ -46,7 +49,8 @@ module rbnode_mod
   public rbnode_find
   public rbnode_leftmost, rbnode_nextnode, rbnode_prevnode
   public rbnode_insert, rbnode_delete
-  public rbnode_validate
+  public rbnode_validate, rbnode_blackheight
+  public join
 
 contains
 
@@ -110,6 +114,31 @@ contains
     new%right => null()
     new%parent => null()
   end function rbnode_new
+
+
+  function rbnode_newroot(left,dat,colour,right) result(new)
+    type(rbnode_t), intent(in), pointer :: left, right
+    integer(DATA_KIND), intent(in) :: dat(:)
+    logical(int8), intent(in) :: colour
+    type(rbnode_t), pointer :: new
+
+    integer :: ierr
+
+    allocate(new, stat=ierr)
+    if (ierr /= 0) &
+        error stop 'could not allocate new rbtr node'
+    allocate(new%dat(size(dat)), stat=ierr)
+    if (ierr /= 0) &
+        error stop 'could not allocate data in new rbtr node'
+    new%dat = dat
+    new%isblack = colour
+    new%left => left
+    new%right => right
+    new%parent => null()
+
+    if (associated(new%left)) new%left%parent => new
+    if (associated(new%right)) new%right%parent => new
+  end function rbnode_newroot
 
 
   subroutine rbnode_update(node, newdata)
@@ -715,7 +744,7 @@ contains
     integer, optional, intent(out) :: ierr
     type(rbnode_t), pointer, intent(out), optional :: deleted_output
 
-    integer :: ierr0
+    integer :: ierr0 ! TODO error processing not finished
     type(rbnode_t), pointer :: n, ch
     integer(kind=DATA_KIND), allocatable :: tmp_dat(:)
 
@@ -980,6 +1009,80 @@ contains
   end subroutine delete_case6
 
 
+  ! =============================
+  ! Set operations (experimental)
+  ! =============================
+
+  recursive function join_right(tl, key, tr) result(newroot)
+    type(rbnode_t), intent(in), pointer :: tl, tr
+    integer(DATA_KIND), intent(in) :: key(:)
+    type(rbnode_t), pointer :: newroot
+
+    type(rbbasetree_t) :: t
+    type(rbnode_t), pointer :: tmp
+
+    if (tl%isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
+      newroot => rbnode_t(tl, key, RED_COLOUR, tr)
+      return
+    end if
+
+    t%root => rbnode_t(tl%left, rbnode_read(tl), tl%isblack, &
+        join_right(tl%right, key, tr))
+
+    if (rbnode_isblack(tl) .and. &
+       ((rbnode_isblack(t%root%right) .eqv. RED_COLOUR) .and. &
+        (rbnode_isblack(t%root%right%right) .eqv. RED_COLOUR))) then
+      t%root%right%right%isblack = BLACK_COLOUR
+      tmp => rotate_left(t%root, t)
+      newroot => tmp
+      return
+    end if
+    newroot => t%root
+  end function join_right
+
+
+  recursive function join_left(tl, key, tr) result(newroot)
+    type(rbnode_t), intent(in), pointer :: tl, tr
+    integer(DATA_KIND), intent(in) :: key(:)
+    type(rbnode_t), pointer :: newroot
+
+    type(rbbasetree_t) :: t
+    type(rbnode_t), pointer :: tmp
+
+    stop 'not ready'
+  end function join_left
+
+
+  function join(tl, key, tr) result(newroot)
+    type(rbnode_t), intent(in), pointer :: tl, tr
+    integer(DATA_KIND), intent(in) :: key(:)
+    type(rbnode_t), pointer :: newroot
+
+    type(rbbasetree_t) :: t
+
+    if (rbnode_blackheight(tl) > rbnode_blackheight(tr)) then
+      t%root => join_right(tl, key, tr)
+      if ((rbnode_isblack(t%root) .eqv. RED_COLOUR) .and. &
+          (rbnode_isblack(t%root%right) .eqv. RED_COLOUR )) then
+        t%root%isblack = BLACK_COLOUR
+      end if
+      newroot => t%root
+      return
+    end if
+
+    if (rbnode_blackheight(tl) < rbnode_blackheight(tr)) then
+      stop 'not ready'
+    end if
+
+    if ((rbnode_isblack(tl) .eqv. BLACK_COLOUR) .and. &
+        (rbnode_isblack(tr) .eqv. BLACK_COLOUR)) then
+      newroot => rbnode_t(tl,key,RED_COLOUR,tr)
+    else
+      newroot => rbnode_t(tl,key,BLACK_COLOUR,tr)
+    end if
+  end function join
+
+
   ! ================================
   ! Validation and debugging helpers
   ! ================================
@@ -1038,5 +1141,32 @@ contains
     isvalid = isvalid .and. isvalid_bst
 
   end subroutine rbnode_validate
+
+
+  function rbnode_blackheight(node) result(bh)
+    !* The black height of a red–black tree is the number of black nodes in any
+    !  path from the root to the leaves. The black height of a node is the black
+    !  height of the subtree rooted by it. The black height of a NIL node shall
+    !  be set to 0, because its subtree is empty, and its tree height is also 0.
+    !
+    type(rbnode_t), pointer, intent(in) :: node
+    integer :: bh
+    type(rbnode_t), pointer :: current
+
+    bh = 0
+    current => node
+    do
+      if (.not. associated(current)) exit
+      if (current%isblack) bh = bh + 1
+      current => current%left ! if tree is valid, the choice is arbitrary
+    end do
+  end function rbnode_blackheight
+
+
+  function rbbasetree_blackheight(this) result(bh)
+    class(rbbasetree_t), intent(in) :: this
+    integer :: bh
+    bh = rbnode_blackheight(this%root)
+  end function rbbasetree_blackheight
 
 end module rbnode_mod

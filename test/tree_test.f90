@@ -5,10 +5,35 @@ module tree_test_mod
 
 contains
 
+  subroutine tree_test_join()
+    integer, parameter, dimension(*) :: dat_a=[1, 5, 6, 7, 8, 11, 12, 13, 15, 17, 19, 2, 3, 4, 9]
+    integer, parameter, dimension(*) :: dat_b=[21, 25, 27, 35]
+    type(rbbasetree_t) :: tree_a, tree_b, tree_ab
+    integer :: i, ierr
+
+    do i=1, size(dat_a)
+      call rbnode_insert(tree_a, rbnode_t(transfer(dat_a(i),mold)), tree_test_basic_comp, ierr)
+      if (ierr/=0) print *, 'Insert ierr = ',ierr
+    end do
+    print '("Is tree valid after inserion?",L2)', tree_a%isvalid(tree_test_basic_comp)
+    do i=1, size(dat_b)
+      call rbnode_insert(tree_b, rbnode_t(transfer(dat_b(i),mold)), tree_test_basic_comp, ierr)
+      if (ierr/=0) print *, 'Insert ierr = ',ierr
+    end do
+    print '("Is tree valid after inserion?",L2)', tree_b%isvalid(tree_test_basic_comp)
+    call dump_graphviz('our_a', tree_a)
+    call dump_graphviz('our_b', tree_b)
+
+    tree_ab%root => join(tree_a%root, transfer(20,mold), tree_b%root)
+    print '("Is tree valid after join?",L2)', tree_ab%isvalid(tree_test_basic_comp)
+    call dump_graphviz('our_ab', tree_ab)
+
+  end subroutine tree_test_join
+
   subroutine tree_test_basic()
     integer, parameter, dimension(*) :: DATA=[10, 5, 7, 8, 9, 11, 12, 13]
-   !integer, parameter :: NSIZE = 1025
-    integer, parameter :: NSIZE = 150000
+    integer, parameter :: NSIZE = 52
+   !integer, parameter :: NSIZE = 150000
 
     type(rbnode_t), pointer :: current, output
     type(rbbasetree_t) :: tree
@@ -20,22 +45,20 @@ contains
     y2 = shuffle_array(y1)
 
     do i=1, size(y2)
-      !call rbnode_insert(root, &
-      !                     rbnode_t(transfer(DATA(i),mold)), &
-      !                     tree_test_basic_comp, ierr)
-      call rbnode_insert(tree, &
-                           rbnode_t(transfer(y2(i),mold)), &
-                           tree_test_basic_comp, ierr)
+      !call rbnode_insert(tree, rbnode_t(transfer(DATA(i),mold)), tree_test_basic_comp, ierr)
+      call rbnode_insert(tree, rbnode_t(transfer(y2(i),mold)), tree_test_basic_comp, ierr)
       if (ierr/=0) print *, 'Insert ierr = ',ierr
     end do
     print '("Is tree valid after inserion?",L2)', &
       tree%isvalid(tree_test_basic_comp)
+    call dump_graphviz('our_tree', tree)
 
     ! traversing
     current=>rbnode_leftmost(tree%root)
     do
       if (.not. associated(current)) exit
-     !write(*,'(i0,l2,2x)',advance='no') transfer(rbnode_read(current),i), current%is_node_black()
+      write(*,'("[",i0,l2,": ",i0,"]",3x)',advance='no') &
+          transfer(rbnode_read(current),i), current%is_node_black(), rbnode_blackheight(current)
       current => current%nextnode()
     end do
     write(*,*)
@@ -61,9 +84,55 @@ contains
     call rbnode_validate(tree%root, tree_test_basic_comp, isvalid, nblacks)
     print '("Is tree valid ?",L2, " black nodes count = ",i0)',isvalid, nblacks
 
-
-
   end subroutine
+
+  subroutine dump_graphviz(basename, tree)
+    character(len=*), intent(in) :: basename
+    type(rbbasetree_t), intent(in) :: tree
+
+    integer :: fid, cmdstat, exitstat
+    character(len=200) cmdmsg
+
+    if (.not. associated(tree%root)) then
+      print *, 'Warning: graphviz dump skiped for empty tree'
+      return
+    end if
+
+    open(newunit=fid, file=basename//'.gv.txt', status='replace')
+    write(fid,'(a,/,a)') 'digraph {','node [fontname="Arial"];'
+    call visit_nodes(tree%root, fid)
+    write(fid,'(a)') '}'
+    flush(fid)
+    call execute_command_line('dot -Tpng < '//basename//'.gv.txt'//' > '//basename//'.png', &
+        exitstat=exitstat, cmdstat=cmdstat, cmdmsg=cmdmsg)
+    if (exitstat/=0 .or. cmdstat/=0) print *, exitstat, cmdstat, cmdmsg
+    close(fid, status='delete')
+  end subroutine dump_graphviz
+
+
+  recursive subroutine visit_nodes(current, fid)
+    type(rbnode_t), pointer, intent(in) :: current
+    integer, intent(in) :: fid
+
+    type(rbnode_t), pointer :: par, left, right
+    character(len=11) bufcur, bufpar
+
+    write(bufcur,'(i11)') transfer(rbnode_read(current),fid)
+    if (.not. current%is_node_black()) then
+      write(fid,'(a)') trim(adjustl(bufcur))//' [color=red]'
+    end if
+
+    par => current%upnode()
+    if (associated(par)) then
+      write(bufpar,'(i11)') transfer(rbnode_read(par),fid)
+      write(fid,'(a)') trim(adjustl(bufpar))//' -> '//trim(adjustl(bufcur))
+    end if
+
+    left => current%leftnode()
+    right => current%rightnode()
+    if (associated(left)) call visit_nodes(left, fid)
+    if (associated(right)) call visit_nodes(right, fid)
+  end subroutine visit_nodes
 
 
   integer function tree_test_basic_comp(a,b) result(comp)

@@ -8,7 +8,8 @@ program test_dll
     end subroutine test2
   end interface
 
-  call tree_test_basic()
+  !call tree_test_basic()
+  call tree_test_join()
   stop
 
   call test1()
