@@ -121,21 +121,37 @@ allocation_counter=allocation_counter+1
   end function rbnode_new
 
 
-  function rbnode_newroot(left,dat,colour,right) result(new)
+  function rbnode_newroot(left, dat, colour, right, place_to_reuse) result(new)
     type(rbnode_t), intent(in), pointer :: left, right
     integer(DATA_KIND), intent(in) :: dat(:)
     logical(int8), intent(in) :: colour
+    type(rbnode_t), pointer, optional :: place_to_reuse
     type(rbnode_t), pointer :: new
 
     integer :: ierr
 
+    ! Either allocate new memory or re-use the existing one 
+    if (.not. present(place_to_reuse)) then
 allocation_counter=allocation_counter+1
-    allocate(new, stat=ierr)
-    if (ierr /= 0) &
-        error stop 'could not allocate new rbtr node'
-    allocate(new%dat(size(dat)), stat=ierr)
-    if (ierr /= 0) &
-        error stop 'could not allocate data in new rbtr node'
+      allocate(new, stat=ierr)
+      if (ierr /= 0) &
+          error stop 'could not allocate new rbtr node'
+      allocate(new%dat(size(dat)), stat=ierr)
+      if (ierr /= 0) &
+          error stop 'could not allocate data in new rbtr node'
+    else
+      if (.not. associated(place_to_reuse)) &
+          error stop 'place to reuse is null'
+      ierr = 0
+      if (allocated(place_to_reuse%dat)) then
+        if (size(dat) /= size(place_to_reuse%dat)) deallocate(place_to_reuse%dat, stat=ierr)
+        if (ierr/=0) error stop 'could not deallocate data in place_to_reuse'
+      end if
+      if (.not. allocated(place_to_reuse%dat)) allocate(place_to_reuse%dat(size(dat)), stat=ierr)
+      if (ierr/=0) error stop 'could not allocate data in place_to_reuse'
+      new => place_to_reuse
+    end if
+
     new%dat = dat
     new%isblack = colour
     new%left => left
@@ -1030,7 +1046,7 @@ allocation_counter=allocation_counter-1
     type(rbnode_t), pointer :: newroot
 
     type(rbbasetree_t) :: t
-    type(rbnode_t), pointer :: old
+   !type(rbnode_t), pointer :: old
     logical(int8) :: tl_isblack
 
     if (tl%isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
@@ -1039,10 +1055,10 @@ allocation_counter=allocation_counter-1
     end if
 
     tl_isblack = rbnode_isblack(tl)
-    old => tl
+   !old => tl
     t%root => rbnode_t(tl%left, rbnode_read(tl), tl%isblack, &
-        join_right(tl%right, key, tr))
-    call rbnode_free(old)
+        join_right(tl%right, key, tr), place_to_reuse=tl)
+   !call rbnode_free(old)
 
     if (tl_isblack .and. &
        ((rbnode_isblack(t%root%right) .eqv. RED_COLOUR) .and. &
@@ -1061,7 +1077,7 @@ allocation_counter=allocation_counter-1
     type(rbnode_t), pointer :: newroot
 
     type(rbbasetree_t) :: t
-    type(rbnode_t), pointer :: old
+    !type(rbnode_t), pointer :: old
     logical(int8) :: tr_isblack
 
     if (tr%isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
@@ -1070,10 +1086,10 @@ allocation_counter=allocation_counter-1
     end if
 
     tr_isblack = rbnode_isblack(tr)
-    old => tr
+    !old => tr
     t%root => rbnode_t(join_left(tl, key, tr%left), &
-        rbnode_read(tr), tr%isblack, tr%right)
-    call rbnode_free(old)
+        rbnode_read(tr), tr%isblack, tr%right, place_to_reuse=tr)
+    !call rbnode_free(old)
 
     if (tr_isblack .and. &
        ((rbnode_isblack(t%root%left) .eqv. RED_COLOUR) .and. &
