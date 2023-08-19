@@ -121,45 +121,31 @@ allocation_counter=allocation_counter+1
   end function rbnode_new
 
 
-  function rbnode_newroot(left, dat, colour, right, place_to_reuse) result(new)
+  function rbnode_newroot(left, dat, colour, right) result(new)
     type(rbnode_t), intent(in), pointer :: left, right
     integer(DATA_KIND), intent(in) :: dat(:)
     logical(int8), intent(in) :: colour
-    type(rbnode_t), pointer, optional :: place_to_reuse
     type(rbnode_t), pointer :: new
 
     integer :: ierr
 
     ! Either allocate new memory or re-use the existing one 
-    if (.not. present(place_to_reuse)) then
 allocation_counter=allocation_counter+1
-      allocate(new, stat=ierr)
-      if (ierr /= 0) &
-          error stop 'could not allocate new rbtr node'
-      allocate(new%dat(size(dat)), stat=ierr)
-      if (ierr /= 0) &
-          error stop 'could not allocate data in new rbtr node'
-    else
-      if (.not. associated(place_to_reuse)) &
-          error stop 'place to reuse is null'
-      ierr = 0
-      if (allocated(place_to_reuse%dat)) then
-        if (size(dat) /= size(place_to_reuse%dat)) deallocate(place_to_reuse%dat, stat=ierr)
-        if (ierr/=0) error stop 'could not deallocate data in place_to_reuse'
-      end if
-      if (.not. allocated(place_to_reuse%dat)) allocate(place_to_reuse%dat(size(dat)), stat=ierr)
-      if (ierr/=0) error stop 'could not allocate data in place_to_reuse'
-      new => place_to_reuse
-    end if
+    allocate(new, stat=ierr)
+    if (ierr /= 0) &
+        error stop 'could not allocate new rbtr node'
+    allocate(new%dat(size(dat)), stat=ierr)
+    if (ierr /= 0) &
+        error stop 'could not allocate data in new rbtr node'
 
     new%dat = dat
     new%isblack = colour
-    new%left => left
-    new%right => right
     new%parent => null()
-
+    new%left => left
     if (associated(new%left)) new%left%parent => new
+    new%right => right
     if (associated(new%right)) new%right%parent => new
+
   end function rbnode_newroot
 
 
@@ -695,7 +681,8 @@ allocation_counter=allocation_counter-1
     p => n%parent
     MAIN: if (.not. associated(p)) then
       ! CASE I - `n` is root, root should be black
-      n%isblack = .true.
+      !Allow red roots? TODO
+      !n%isblack = .true.
       if (.not. associated(tree%root,n)) &
           error stop 'node n seems to be root, but root points elsewhere'
 
@@ -739,7 +726,11 @@ allocation_counter=allocation_counter-1
           tmp => rotate_right(g, tree)
         else if (whichchild_p==RIGHT_CHILD) then
           tmp => rotate_left(g, tree)
-        else
+        else if (whichchild_p==NO_PARENT) then
+          ! parent is red-root, it can be always relabeled
+          p%isblack = BLACK_COLOUR
+          return
+        else 
           error stop 'case IV, part 2, unreachable branch'
         end if
 
@@ -1036,9 +1027,18 @@ allocation_counter=allocation_counter-1
   ! Set operations (experimental)
   ! =============================
 
-  ! Ideas for improvement TODO
-  ! Note: when joining, the recursive algorithm allocates and deallocates
-  ! the nodes / I would like to find a way to avoid it and reuse the space
+  recursive function re_root(left,root,right) result(newroot)
+    type(rbnode_t), intent(in), pointer :: left, root, right
+    type(rbnode_t), pointer :: newroot
+
+    newroot => root
+    newroot%parent => null()
+    newroot%left => left
+    if (associated(newroot%left)) newroot%left%parent => newroot
+    newroot%right => right
+    if (associated(newroot%right)) newroot%right%parent => newroot
+  end function re_root
+
 
   recursive function join_right(tl, key, tr) result(newroot)
     type(rbnode_t), intent(in), pointer :: tl, tr
@@ -1049,16 +1049,14 @@ allocation_counter=allocation_counter-1
    !type(rbnode_t), pointer :: old
     logical(int8) :: tl_isblack
 
-    if (tl%isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
+    tl_isblack = rbnode_isblack(tl)
+
+    if (tl_isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
       newroot => rbnode_t(tl, key, RED_COLOUR, tr)
       return
     end if
 
-    tl_isblack = rbnode_isblack(tl)
-   !old => tl
-    t%root => rbnode_t(tl%left, rbnode_read(tl), tl%isblack, &
-        join_right(tl%right, key, tr), place_to_reuse=tl)
-   !call rbnode_free(old)
+    t%root => re_root(tl%left, tl, join_right(tl%right, key, tr))
 
     if (tl_isblack .and. &
        ((rbnode_isblack(t%root%right) .eqv. RED_COLOUR) .and. &
@@ -1080,16 +1078,14 @@ allocation_counter=allocation_counter-1
     !type(rbnode_t), pointer :: old
     logical(int8) :: tr_isblack
 
-    if (tr%isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
+    tr_isblack = rbnode_isblack(tr)
+
+    if (tr_isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
       newroot => rbnode_t(tl, key, RED_COLOUR, tr)
       return
     end if
 
-    tr_isblack = rbnode_isblack(tr)
-    !old => tr
-    t%root => rbnode_t(join_left(tl, key, tr%left), &
-        rbnode_read(tr), tr%isblack, tr%right, place_to_reuse=tr)
-    !call rbnode_free(old)
+    t%root => re_root(join_left(tl, key, tr%left), tr, tr%right)
 
     if (tr_isblack .and. &
        ((rbnode_isblack(t%root%left) .eqv. RED_COLOUR) .and. &
@@ -1106,16 +1102,6 @@ allocation_counter=allocation_counter-1
     type(rbnode_t), intent(in), pointer :: tl, tr
     integer(DATA_KIND), intent(in) :: key(:)
     type(rbnode_t), pointer :: newroot
-
-    if (.not. associated(tl)) then
-      newroot => tr
-      print '("Join - Left tree is empty")'
-      return
-    else if (.not. associated(tr)) then
-      print '("Join - Right tree is empty")'
-      newroot => tl
-      return
-    end if
 
     if (rbnode_blackheight(tl) > rbnode_blackheight(tr)) then
       newroot => join_right(tl, key, tr)

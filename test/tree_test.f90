@@ -8,7 +8,7 @@ contains
   subroutine tree_test_join()
     type(rbbasetree_t) :: tree_a, tree_b, tree_ab
     integer :: i, ierr
-    integer, parameter :: NMID=4988099, NRIGHT=5000000
+    integer, parameter :: NMID=2500000, NRIGHT=2500200
 
     do i=1, NMID-1
       call rbnode_insert(tree_a, rbnode_t(transfer(i,mold)), tree_test_basic_comp)
@@ -16,7 +16,8 @@ contains
     print '("Insertion L - Valid? ",L2," black height is ",i0)', &
         tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
 
-    do i=NMID+1, NRIGHT
+    do i=NRIGHT, NMID+1, -1
+    !do i=NMID+1, NRIGHT
       call rbnode_insert(tree_b, rbnode_t(transfer(i,mold)), tree_test_basic_comp, ierr)
       if (ierr/=0) print *, 'Insert ierr = ',ierr
     end do
