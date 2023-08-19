@@ -8,15 +8,17 @@ contains
   subroutine tree_test_join()
     type(rbbasetree_t) :: tree_a, tree_b, tree_ab
     integer :: i, ierr
-    integer, parameter :: NMID=2500000, NRIGHT=2500200
+    integer, parameter :: IMID=4000, ISPLIT=3914080, NTOT=4120000
+    !logical :: key_in_tree
+    type(rbnode_t), pointer :: key_in_tree
 
-    do i=1, NMID-1
+    do i=2, IMID-1, 2
       call rbnode_insert(tree_a, rbnode_t(transfer(i,mold)), tree_test_basic_comp)
     end do
     print '("Insertion L - Valid? ",L2," black height is ",i0)', &
         tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
 
-    do i=NRIGHT, NMID+1, -1
+    do i=NTOT, IMID+1, -2
     !do i=NMID+1, NRIGHT
       call rbnode_insert(tree_b, rbnode_t(transfer(i,mold)), tree_test_basic_comp, ierr)
       if (ierr/=0) print *, 'Insert ierr = ',ierr
@@ -26,19 +28,64 @@ contains
 
     !call dump_graphviz('our_a', tree_a)
     !call dump_graphviz('our_b', tree_b)
+    print *
+    !print *, 'Traverse A'
+    !call traverse(tree_a)
+    print *
+    !print *, 'Traverse B'
+    !call traverse(tree_b)
 
-    tree_ab%root => join(tree_a%root, transfer(NMID,mold), tree_b%root)
+    tree_ab%root => join(tree_a%root, transfer(IMID,mold), tree_b%root)
     print '("Join L+R    - Valid? ",L2," black height is ",i0)', &
         tree_ab%isvalid(tree_test_basic_comp), tree_ab%blackheight()
 
     !call dump_graphviz('our_ab', tree_ab)
+    print *
+    !print *, 'Traverse AB'
+    !call traverse(tree_ab)
+
+    ! Split
+    print *
+    print *, 'SPLIT'
+    call split(tree_a%root,key_in_tree,tree_b%root, &
+        tree_ab%root, transfer(ISPLIT,mold), tree_test_basic_comp)
+    print '("Split: key_in_tree ",L2)', associated(key_in_tree)
+    if (associated(key_in_tree)) then
+      print *, 'Key =',transfer(rbnode_read(key_in_tree),i)
+      call rbnode_free(key_in_tree)
+    end if
+    print '("Insertion L - Valid? ",L2," black height is ",i0)', &
+        tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
+    print '("Insertion R - Valid? ",L2," black height is ",i0)', &
+        tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
+    !call dump_graphviz('our_c', tree_a)
+    !call dump_graphviz('our_d', tree_b)
+    print *
+    !print *, 'Traverse B'
+    !call traverse(tree_b)
+    print *
+    !print *, 'Traverse A'
+    !call traverse(tree_a)
 
     ! Delete everything
-    do i=1,NRIGHT
-      call rbnode_delete(tree_ab, rbnode_find(tree_ab%root, transfer(i,mold), tree_test_basic_comp))
+    print *
+    print *, 'DELETE'
+   !do i=1,NRIGHT
+   !  call rbnode_delete(tree_ab, rbnode_find(tree_ab%root, transfer(i,mold), tree_test_basic_comp))
+   !end do
+    do i=2,min(ISPLIT-1,NTOT),2
+      call rbnode_delete(tree_a, rbnode_find(tree_a%root, transfer(i,mold), tree_test_basic_comp))
     end do
+    do i=ISPLIT+2-mod(ISPLIT,2), NTOT,2
+      call rbnode_delete(tree_b, rbnode_find(tree_b%root, transfer(i,mold), tree_test_basic_comp))
+    end do
+
+   !print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
+   !    tree_ab%isvalid(tree_test_basic_comp), tree_ab%blackheight()
     print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
-        tree_ab%isvalid(tree_test_basic_comp), tree_ab%blackheight()
+        tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
+    print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
+        tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
     print *, 'Allocated nodes zero?  =', allocation_counter
 
   end subroutine tree_test_join
@@ -98,6 +145,27 @@ contains
     print '("Is tree valid ?",L2, " black nodes count = ",i0)',isvalid, nblacks
 
   end subroutine
+
+
+  subroutine traverse(t)
+    type(rbbasetree_t), intent(in) :: t
+    type(rbnode_t), pointer :: current
+    integer :: i
+    ! traversing
+    if (.not. associated(t%root)) then
+      print '("Traverse: Tree is empty")'
+      return
+    end if
+
+    current=>rbnode_leftmost(t%root)
+    do
+      if (.not. associated(current)) exit
+      write(*,'("[",i0,l2,": ",i0,"]",3x)',advance='no') &
+          transfer(rbnode_read(current),i), current%is_node_black(), rbnode_blackheight(current)
+      current => current%nextnode()
+    end do
+    write(*,*)
+  end subroutine traverse
 
   subroutine dump_graphviz(basename, tree)
     character(len=*), intent(in) :: basename

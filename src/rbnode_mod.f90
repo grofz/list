@@ -50,7 +50,7 @@ module rbnode_mod
   public rbnode_leftmost, rbnode_nextnode, rbnode_prevnode
   public rbnode_insert, rbnode_delete
   public rbnode_validate, rbnode_blackheight
-  public join
+  public join, split
 
   integer, public, save :: allocation_counter = 0
     !! temporary, just for mem.leakage debuging TODO
@@ -122,6 +122,8 @@ allocation_counter=allocation_counter+1
 
 
   function rbnode_newroot(left, dat, colour, right) result(new)
+    !! Allocate new node, fill it with given data and colour, and make
+    !! it a root of two given sub-trees
     type(rbnode_t), intent(in), pointer :: left, right
     integer(DATA_KIND), intent(in) :: dat(:)
     logical(int8), intent(in) :: colour
@@ -129,7 +131,6 @@ allocation_counter=allocation_counter+1
 
     integer :: ierr
 
-    ! Either allocate new memory or re-use the existing one 
 allocation_counter=allocation_counter+1
     allocate(new, stat=ierr)
     if (ierr /= 0) &
@@ -145,7 +146,6 @@ allocation_counter=allocation_counter+1
     if (associated(new%left)) new%left%parent => new
     new%right => right
     if (associated(new%right)) new%right%parent => new
-
   end function rbnode_newroot
 
 
@@ -739,7 +739,6 @@ allocation_counter=allocation_counter-1
       end if
 
     end if MAIN
-
   end subroutine insert_repair
 
 
@@ -1028,6 +1027,9 @@ allocation_counter=allocation_counter-1
   ! =============================
 
   recursive function re_root(left,root,right) result(newroot)
+    !* Same job as "rbnode_newroot" but here we do not allocate any new memory.
+    !  The existing memory of "root" is reused instead.
+    !
     type(rbnode_t), intent(in), pointer :: left, root, right
     type(rbnode_t), pointer :: newroot
 
@@ -1046,7 +1048,6 @@ allocation_counter=allocation_counter-1
     type(rbnode_t), pointer :: newroot
 
     type(rbbasetree_t) :: t
-   !type(rbnode_t), pointer :: old
     logical(int8) :: tl_isblack
 
     tl_isblack = rbnode_isblack(tl)
@@ -1075,7 +1076,6 @@ allocation_counter=allocation_counter-1
     type(rbnode_t), pointer :: newroot
 
     type(rbbasetree_t) :: t
-    !type(rbnode_t), pointer :: old
     logical(int8) :: tr_isblack
 
     tr_isblack = rbnode_isblack(tr)
@@ -1099,6 +1099,12 @@ allocation_counter=allocation_counter-1
 
 
   function join(tl, key, tr) result(newroot)
+    !* Join two sub-trees and return the pointer to a root of new tree. New
+    !  node with "key" data is allocated during the process.
+    !
+    !  Note: all nodes in the left subtree must have key less than "key", and
+    !  all nodes in the right subtree must have key greater than "key" !
+    !
     type(rbnode_t), intent(in), pointer :: tl, tr
     integer(DATA_KIND), intent(in) :: key(:)
     type(rbnode_t), pointer :: newroot
@@ -1127,6 +1133,78 @@ allocation_counter=allocation_counter-1
       newroot => rbnode_t(tl,key,BLACK_COLOUR,tr)
     end if
   end function join
+
+
+  recursive subroutine split(l_root, key_node, r_root, old_root, key, cfun)
+    !* Split tree. Nodes with a value less than "key" go to the left subtree,
+    !  and nodes with a value larger than "key" go to the right subtree.
+    !
+    !  If tree contains a node with the same value as "key", this node will not
+    !  be included in any of the sub-trees. This node can be accessed through the
+    !  returned pointer "key_node" and it can be freed or inserted to any of the
+    !  subtrees as needed.
+    !
+    !  Tree rooted by "old_root" no longer exists after this operation !
+    !
+    type(rbnode_t), pointer, intent(out) :: l_root, r_root
+    type(rbnode_t), intent(out), pointer :: key_node
+    type(rbnode_t), pointer, intent(in) :: old_root
+    integer(DATA_KIND), intent(in) :: key(:)
+    procedure(compare_fun) :: cfun
+
+    type(rbnode_t), pointer :: ltmp, rtmp, to_delete
+
+    if (.not. associated(old_root)) then
+      l_root => null()
+      key_node => null()
+      r_root => null()
+      return
+    end if
+
+    select case(cfun(key, rbnode_read(old_root)))
+    case(0) ! key == old_root%key
+      l_root => old_root%left
+      if (associated(l_root)) l_root%parent=>null()
+
+      ! the key-node will no longer be part of any sub-tree
+      key_node => old_root
+      key_node%left => null()
+      key_node%right => null()
+      key_node%parent => null()
+
+      r_root => old_root%right
+      if (associated(r_root)) r_root%parent=>null()
+
+    case(-1) ! key < old_root%key
+      call split(ltmp, key_node, rtmp, old_root%left, key, cfun)
+      to_delete => old_root
+      l_root => ltmp
+      r_root => join(rtmp, rbnode_read(old_root), old_root%right)
+
+      ! While "join" returns a correct root node, the parent pointer of the root
+      ! to the other tree must be nullified here. 
+      if (associated(l_root)) l_root%parent=>null()
+
+      ! As a new node has been allocated during "join" process, the actual
+      ! root became superfluous and must be freed. 
+      call rbnode_free(to_delete)
+
+    case(+1) ! key > old_root%key
+      call split(ltmp, key_node, rtmp, old_root%right, key, cfun)
+      to_delete => old_root
+      l_root => join(old_root%left,rbnode_read(old_root),ltmp)
+      r_root => rtmp
+
+      if (associated(r_root)) r_root%parent=>null()
+      call rbnode_free(to_delete)
+
+      !Note: there might be an error on wikipedia...
+      !r_root => old_root%right
+
+    case default
+      error stop 'split: user function returned invalid value'
+    end select
+  end subroutine split
 
 
   ! ================================
