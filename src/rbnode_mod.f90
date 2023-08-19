@@ -50,7 +50,7 @@ module rbnode_mod
   public rbnode_leftmost, rbnode_nextnode, rbnode_prevnode
   public rbnode_insert, rbnode_delete
   public rbnode_validate, rbnode_blackheight
-  public join
+  public join, split
 
   integer, public, save :: allocation_counter = 0
     !! temporary, just for mem.leakage debuging TODO
@@ -1127,6 +1127,58 @@ allocation_counter=allocation_counter-1
       newroot => rbnode_t(tl,key,BLACK_COLOUR,tr)
     end if
   end function join
+
+
+  recursive subroutine split(l_root, key_node, r_root, old_root, key, cfun)
+    !* Split tree. Nodes with a value less than "key" go to the left subtree,
+    !  and nodes with a value larger than "key" go to the right subtree.
+    !  If there is a node with value equal to "key", this node will not be
+    !  included in any of the sub-trees. This node can be accessed through the
+    !  returned pointer "key_node" (it can be freed or inserted to any of the
+    !  subtrees by an user)
+    !
+    type(rbnode_t), pointer, intent(out) :: l_root, r_root
+    type(rbnode_t), intent(out), pointer :: key_node
+    type(rbnode_t), pointer, intent(in) :: old_root
+    integer(DATA_KIND), intent(in) :: key(:)
+    procedure(compare_fun) :: cfun
+
+    type(rbnode_t), pointer :: ltmp, rtmp, to_delete
+
+    if (.not. associated(old_root)) then
+      l_root => null()
+      key_node => null()
+      r_root => null()
+      return
+    end if
+    select case(cfun(key, rbnode_read(old_root)))
+    case(0)
+      l_root => old_root%left
+      key_node => old_root
+      r_root => old_root%right
+     !l_root%parent=>null()
+     !r_root%parent=>null()
+      ! nullify pointers, as the key_node will not be part of any tree
+      key_node%left => null()
+      key_node%right => null()
+      key_node%parent => null()
+    case(-1) ! key < old_root%key
+      call split(ltmp, key_node, rtmp, old_root%left, key, cfun)
+      to_delete => old_root
+      l_root => ltmp
+      r_root => join(rtmp, rbnode_read(old_root), old_root%right)
+      call rbnode_free(to_delete)
+    case(+1) ! key > old_root%key
+      call split(ltmp, key_node, rtmp, old_root%right, key, cfun)
+      to_delete => old_root
+      l_root => join(old_root%left,rbnode_read(old_root),ltmp)
+      r_root => rtmp
+      call rbnode_free(to_delete)
+      !r_root => old_root%right ! wikipedia: error or ok?
+    case default
+      error stop 'split: user function returned invalid value'
+    end select
+  end subroutine split
 
 
   ! ================================
