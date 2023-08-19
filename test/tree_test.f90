@@ -5,7 +5,56 @@ module tree_test_mod
 
 contains
 
-  subroutine tree_test_join()
+  subroutine tree_test_union()
+    integer, parameter, dimension(*) :: &
+        DAT1=[10, 1, 5, 13], &
+        DAT2=[1, 9, 10, 6, 13]
+    type(rbbasetree_t) :: t1, t2, t12
+    type(rbnode_t), pointer :: found
+    integer :: i
+
+    do i=1, size(DAT1)
+      call rbnode_insert(t1, rbnode_t(transfer(DAT1(i),mold)), tree_test_basic_comp)
+    end do
+    do i=1, size(DAT2)
+      call rbnode_insert(t2, rbnode_t(transfer(DAT2(i),mold)), tree_test_basic_comp)
+    end do
+    call dump_graphviz('our_a', t1)
+    call dump_graphviz('our_b', t2)
+    print *
+    print *, 'Traverse A'
+    call traverse(t1)
+    print *
+    print *, 'Traverse B'
+    call traverse(t2)
+
+    print *, 'UNION'
+    t12%root => union(t1%root, t2%root, tree_test_basic_comp)
+
+    print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
+        t12%isvalid(tree_test_basic_comp), t12%blackheight()
+    print *
+    print *, 'Traverse A+B'
+    call traverse(t12)
+    call dump_graphviz('our_ab', t12)
+
+    ! Delete
+    do i=1,size(DAT1)
+      call rbnode_delete(t12, rbnode_find(t12%root, transfer(DAT1(i),mold), tree_test_basic_comp))
+    end do
+    do i=1,size(DAT2)
+      found => rbnode_find(t12%root, transfer(DAT2(i),mold), tree_test_basic_comp)
+      if (associated(found)) call rbnode_delete(t12, found)
+    end do
+
+    print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
+        t12%isvalid(tree_test_basic_comp), t12%blackheight()
+    print *, 'Allocated nodes zero?  =', allocation_counter
+    
+  end subroutine tree_test_union
+
+
+  subroutine tree_test_joinsplit()
     type(rbbasetree_t) :: tree_a, tree_b, tree_ab
     integer :: i, ierr
     integer, parameter :: IMID=4000, ISPLIT=3914080, NTOT=4120000
@@ -88,7 +137,7 @@ contains
         tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
     print *, 'Allocated nodes zero?  =', allocation_counter
 
-  end subroutine tree_test_join
+  end subroutine tree_test_joinsplit
 
   subroutine tree_test_basic()
     integer, parameter, dimension(*) :: DATA=[10, 5, 7, 8, 9, 11, 12, 13]

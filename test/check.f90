@@ -9,7 +9,8 @@ program test_dll
   end interface
 
   !call tree_test_basic()
-  call tree_test_join()
+  !call tree_test_joinsplit()
+  call tree_test_union()
   stop
 
   call test1()

@@ -50,7 +50,7 @@ module rbnode_mod
   public rbnode_leftmost, rbnode_nextnode, rbnode_prevnode
   public rbnode_insert, rbnode_delete
   public rbnode_validate, rbnode_blackheight
-  public join, split
+  public join, split, union
 
   integer, public, save :: allocation_counter = 0
     !! temporary, just for mem.leakage debuging TODO
@@ -1205,6 +1205,47 @@ allocation_counter=allocation_counter-1
       error stop 'split: user function returned invalid value'
     end select
   end subroutine split
+
+
+  recursive function union(t1, t2, cfun) result(t)
+    type(rbnode_t), pointer, intent(in) :: t1, t2
+    procedure(compare_fun) :: cfun
+    type(rbnode_t), pointer :: t
+
+    type(rbnode_t), pointer :: l1, r1, key_node, left, right, other_node
+    integer(DATA_KIND), allocatable :: key(:)
+
+    if (.not. associated(t1)) then
+      t => t2
+      return
+    else if (.not. associated(t2)) then
+      t => t1
+      return
+    end if
+
+  print *, 'pre-split', transfer(rbnode_read(t1),1), allocation_counter
+    key = rbnode_read(t1)
+    call split(l1, key_node, r1, t2, key, cfun)
+    other_node => rbnode_find(t1, key, cfun)
+  print *, 'exp-split - key_node', associated(key_node), associated(other_node), allocation_counter
+
+    ! one independent branch (for MPI?)
+    left => union(t1%left, l1, cfun)
+
+    ! second independent branch
+    right => union(t1%right, r1, cfun)
+
+    ! as soon as both branches are complete
+
+print *, 'pre-join', transfer(key,1), allocation_counter
+    t => join(left, key, right)
+    if (associated(key_node)) then
+      call rbnode_free(key_node)
+    end if
+    call rbnode_free(other_node)
+print *, 'ex-join', transfer(key,1), allocation_counter
+print *
+  end function union
 
 
   ! ================================
