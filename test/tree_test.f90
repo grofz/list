@@ -8,7 +8,7 @@ contains
   subroutine tree_test_join()
     type(rbbasetree_t) :: tree_a, tree_b, tree_ab
     integer :: i, ierr
-    integer, parameter :: IMID=4, ISPLIT=4, NTOT=12
+    integer, parameter :: IMID=4000, ISPLIT=3914080, NTOT=4120000
     !logical :: key_in_tree
     type(rbnode_t), pointer :: key_in_tree
 
@@ -26,28 +26,27 @@ contains
     print '("Insertion R - Valid? ",L2," black height is ",i0)', &
         tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
 
-    call dump_graphviz('our_a', tree_a)
-    call dump_graphviz('our_b', tree_b)
+    !call dump_graphviz('our_a', tree_a)
+    !call dump_graphviz('our_b', tree_b)
     print *
-    print *, 'Traverse A'
-    call traverse(tree_a)
+    !print *, 'Traverse A'
+    !call traverse(tree_a)
     print *
-    print *, 'Traverse B'
-    call traverse(tree_b)
+    !print *, 'Traverse B'
+    !call traverse(tree_b)
 
     tree_ab%root => join(tree_a%root, transfer(IMID,mold), tree_b%root)
     print '("Join L+R    - Valid? ",L2," black height is ",i0)', &
         tree_ab%isvalid(tree_test_basic_comp), tree_ab%blackheight()
 
-    call dump_graphviz('our_ab', tree_ab)
+    !call dump_graphviz('our_ab', tree_ab)
     print *
-    print *, 'Traverse AB'
-    call traverse(tree_ab)
+    !print *, 'Traverse AB'
+    !call traverse(tree_ab)
 
     ! Split
     print *
     print *, 'SPLIT'
-    nullify(tree_a%root, tree_b%root)
     call split(tree_a%root,key_in_tree,tree_b%root, &
         tree_ab%root, transfer(ISPLIT,mold), tree_test_basic_comp)
     print '("Split: key_in_tree ",L2)', associated(key_in_tree)
@@ -59,14 +58,14 @@ contains
         tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
     print '("Insertion R - Valid? ",L2," black height is ",i0)', &
         tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
-    call dump_graphviz('our_c', tree_a)
-    call dump_graphviz('our_d', tree_b)
+    !call dump_graphviz('our_c', tree_a)
+    !call dump_graphviz('our_d', tree_b)
     print *
-    print *, 'Traverse B'
-    call traverse(tree_b)
+    !print *, 'Traverse B'
+    !call traverse(tree_b)
     print *
-    print *, 'Traverse A'
-    call traverse(tree_a)
+    !print *, 'Traverse A'
+    !call traverse(tree_a)
 
     ! Delete everything
     print *
@@ -153,6 +152,11 @@ contains
     type(rbnode_t), pointer :: current
     integer :: i
     ! traversing
+    if (.not. associated(t%root)) then
+      print '("Traverse: Tree is empty")'
+      return
+    end if
+
     current=>rbnode_leftmost(t%root)
     do
       if (.not. associated(current)) exit
