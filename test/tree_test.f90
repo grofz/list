@@ -8,7 +8,7 @@ module tree_test_mod
 contains
 
   subroutine tree_test_union()
-    integer, parameter :: NMAX=2000000, N1=1000000, N2=0500000
+    integer, parameter :: NMAX=30000000, N1=20000000, N2=08000000
     !integer, parameter :: NMAX=100, N1=20, N2=35
 
     integer, allocatable :: x1(:), x2(:), x12(:)
@@ -105,56 +105,100 @@ contains
 
 
   subroutine tree_test_joinsplit()
-    type(rbbasetree_t) :: tree_a, tree_b, tree_ab
-    integer :: i, ierr
-    integer, parameter :: IMID=4000, ISPLIT=3914080, NTOT=4120000
-    !logical :: key_in_tree
-    type(rbnode_t), pointer :: key_in_tree
+    type(rbbasetree_t) :: t1, t2, t12, k
+    type(rbnode_t), pointer :: cursor1, cursor2
+    integer, allocatable :: x(:)
+    integer :: i, isplit
+    logical :: passed
+    real :: time(2), xr
+    integer, parameter :: N=50 
+    
+    800 format(a,": nodes = ",i0,"  black_h = ",i0,"  valid? ",l2)
 
-    do i=2, IMID-1, 2
-      call rbnode_insert(tree_a, rbnode_t(transfer(i,mold)), tree_test_basic_comp)
+    print '("-----------------------")'
+    print '("Running Join/Split test       size ",i0,"k")', (N)/1000
+    print '("-----------------------")'
+
+    ! Prepare the tree
+    x = get_array(2*N)
+    x = shuffle_array(x)
+    call start_stopwatch('inserting nodes',time)
+    do i=1, N
+      call rbnode_insert(t12, rbnode_t(transfer(x(i),mold)), tree_test_basic_comp)
     end do
-    print '("Insertion L - Valid? ",L2," black height is ",i0)', &
-        tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
+    call end_stopwatch(time)
 
-    do i=NTOT, IMID+1, -2
+    print 800, 'Tree 12', t12%size(), t12%blackheight(), t12%isvalid(tree_test_basic_comp)
+    passed = t12%isvalid(tree_test_basic_comp)
+    print '("Allocated nodes counter ",i0)', allocation_counter
+
+    call quicksort(x(1:N))
+
+    ! Split the tree
+    call random_number(xr)
+    isplit = int((2*N*xr)+1)
+    call start_stopwatch('spliting tree',time)
+    call split2(t1%root, k%root, t2%root, t12%root, transfer(isplit,mold), tree_test_basic_comp)
+    call end_stopwatch(time)
+
+    print 800, 'Tree 1', t1%size(), t1%blackheight(), t1%isvalid(tree_test_basic_comp)
+    print 800, 'Tree 2', t2%size(), t2%blackheight(), t2%isvalid(tree_test_basic_comp)
+    passed = passed .and. t1%isvalid(tree_test_basic_comp) .and. t2%isvalid(tree_test_basic_comp)
+    call t1%graphviz('tree_1', get_node_label)
+    call t2%graphviz('tree_2', get_node_label)
+    call traverse(t1, 'L')
+    call traverse(t2, 'R')
+    call traverse(k,  'K')
+    print '("Allocated nodes counter ",i0)', allocation_counter
+
+    stop
+
+    print 800, 'Tree 12', t12%size(), t12%blackheight(), t12%isvalid(tree_test_basic_comp)
+    passed = t12%isvalid(tree_test_basic_comp)
+    print '("Allocated nodes counter ",i0)', allocation_counter
+
+
+   !print '("Insertion L - Valid? ",L2," black height is ",i0)', &
+   !    tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
+
+   !do i=NTOT, IMID+1, -2
     !do i=NMID+1, NRIGHT
-      call rbnode_insert(tree_b, rbnode_t(transfer(i,mold)), tree_test_basic_comp, ierr)
-      if (ierr/=0) print *, 'Insert ierr = ',ierr
-    end do
-    print '("Insertion R - Valid? ",L2," black height is ",i0)', &
-        tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
+   !  call rbnode_insert(tree_b, rbnode_t(transfer(i,mold)), tree_test_basic_comp, ierr)
+   !  if (ierr/=0) print *, 'Insert ierr = ',ierr
+   !end do
+   !print '("Insertion R - Valid? ",L2," black height is ",i0)', &
+   !    tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
 
-    call tree_a%graphviz('our_a', get_node_label)
-    call tree_b%graphviz('our_b', get_node_label)
-    call traverse(tree_a,'tree_a')
-    call traverse(tree_b,'tree_b')
+   !call tree_a%graphviz('our_a', get_node_label)
+   !call tree_b%graphviz('our_b', get_node_label)
+   !call traverse(tree_a,'tree_a')
+   !call traverse(tree_b,'tree_b')
 
-    tree_ab%root => join(tree_a%root, transfer(IMID,mold), tree_b%root)
-    print '("Join L+R    - Valid? ",L2," black height is ",i0)', &
-        tree_ab%isvalid(tree_test_basic_comp), tree_ab%blackheight()
+   !tree_ab%root => join(tree_a%root, transfer(IMID,mold), tree_b%root)
+   !print '("Join L+R    - Valid? ",L2," black height is ",i0)', &
+   !    tree_ab%isvalid(tree_test_basic_comp), tree_ab%blackheight()
 
-    call tree_ab%graphviz('our_ab', get_node_label)
-    call traverse(tree_ab,'tree_ab')
+   !call tree_ab%graphviz('our_ab', get_node_label)
+   !call traverse(tree_ab,'tree_ab')
 
     ! Split
-    print *
-    print *, 'SPLIT'
-    call split(tree_a%root,key_in_tree,tree_b%root, &
-        tree_ab%root, transfer(ISPLIT,mold), tree_test_basic_comp)
-    print '("Split: key_in_tree ",L2)', associated(key_in_tree)
-    if (associated(key_in_tree)) then
-      print *, 'Key =',transfer(rbnode_read(key_in_tree),i)
-      call rbnode_free(key_in_tree)
-    end if
-    print '("Insertion L - Valid? ",L2," black height is ",i0)', &
-        tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
-    print '("Insertion R - Valid? ",L2," black height is ",i0)', &
-        tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
-    call tree_a%graphviz('our_c', get_node_label)
-    call tree_b%graphviz('our_d', get_node_label)
-    call traverse(tree_b,'tree_b')
-    call traverse(tree_a,'tree_a')
+   !print *
+   !print *, 'SPLIT'
+   !call split(tree_a%root,key_in_tree,tree_b%root, &
+   !    tree_ab%root, transfer(ISPLIT,mold), tree_test_basic_comp)
+   !print '("Split: key_in_tree ",L2)', associated(key_in_tree)
+   !if (associated(key_in_tree)) then
+   !  print *, 'Key =',transfer(rbnode_read(key_in_tree),i)
+   !  call rbnode_free(key_in_tree)
+   !end if
+   !print '("Insertion L - Valid? ",L2," black height is ",i0)', &
+   !    tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
+   !print '("Insertion R - Valid? ",L2," black height is ",i0)', &
+   !    tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
+   !call tree_a%graphviz('our_c', get_node_label)
+   !call tree_b%graphviz('our_d', get_node_label)
+   !call traverse(tree_b,'tree_b')
+   !call traverse(tree_a,'tree_a')
 
     ! Delete everything
     print *
@@ -162,20 +206,20 @@ contains
    !do i=1,NRIGHT
    !  call rbnode_delete(tree_ab, rbnode_find(tree_ab%root, transfer(i,mold), tree_test_basic_comp))
    !end do
-    do i=2,min(ISPLIT-1,NTOT),2
-      call rbnode_delete(tree_a, rbnode_find(tree_a%root, transfer(i,mold), tree_test_basic_comp))
-    end do
-    do i=ISPLIT+2-mod(ISPLIT,2), NTOT,2
-      call rbnode_delete(tree_b, rbnode_find(tree_b%root, transfer(i,mold), tree_test_basic_comp))
-    end do
+   !do i=2,min(ISPLIT-1,NTOT),2
+   !  call rbnode_delete(tree_a, rbnode_find(tree_a%root, transfer(i,mold), tree_test_basic_comp))
+   !end do
+   !do i=ISPLIT+2-mod(ISPLIT,2), NTOT,2
+   !  call rbnode_delete(tree_b, rbnode_find(tree_b%root, transfer(i,mold), tree_test_basic_comp))
+   !end do
 
    !print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
    !    tree_ab%isvalid(tree_test_basic_comp), tree_ab%blackheight()
-    print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
-        tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
-    print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
-        tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
-    print *, 'Allocated nodes zero?  =', allocation_counter
+   !print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
+   !    tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
+   !print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
+   !    tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
+   !print *, 'Allocated nodes zero?  =', allocation_counter
 
   end subroutine tree_test_joinsplit
 
@@ -240,15 +284,49 @@ contains
    !integer, parameter, dimension(*) :: &
    !   DAT1=[10, 1, 5, 13], & ! these gave memory leak union (but should be fixed)
    !   DAT2=[1, 9, 10, 6, 13]
-    type(rbbasetree_t) :: t
-    integer, parameter, dimension(*) :: DAT = [2, 10, 1, 3, 23, 54, 13]
-    integer :: i
+    type(rbbasetree_t) :: tl, tr, tjoin, tsl, tsr, sk
+    type(rbnode_t), pointer :: k
+    integer, parameter, dimension(*) :: &
+      x1 = [20, 4], &
+      x2 = [40, 50, 60]
+    integer, parameter :: KEY=31, KSPLIT=30
+    integer :: i 
+    
+   do i=1, max(size(x1), size(x2)) ! Insert nodes
+     if (i<=size(x1)) call rbnode_insert(tl, rbnode_t(transfer(x1(i),mold)), tree_test_basic_comp)
+     if (i<=size(x2)) call rbnode_insert(tr, rbnode_t(transfer(x2(i),mold)), tree_test_basic_comp)
+   end do
+    k => rbnode_t(transfer(KEY,mold))
+    call tl%graphviz('tree_left',get_node_label)
+    call tr%graphviz('tree_right',get_node_label)
+   !call traverse(tl,'tl')
+   !call traverse(tr,'tr')
+    print '("Black height of tl/tr: ",l2,1x,i0," | ",l2,1x,i0)', &
+        tl%isvalid(tree_test_basic_comp), tl%blackheight(), tr%isvalid(tree_test_basic_comp), tr%blackheight()
+    print '("Allocated nodes counter ",i0)', allocation_counter
 
-    do i=1, size(DAT)
-      call rbnode_insert(t, rbnode_t(transfer(DAT(i),mold)), tree_test_basic_comp)
-    end do
-    print '("Tree size ",i0)', t%size()
-    call t%graphviz('tree_play',get_node_label)
+    ! JOIN OPERATION
+    tjoin%root => join2(tl%root, k, tr%root)
+
+    print '("Black height of tjoin: ",l2,1x,i0)', &
+        tjoin%isvalid(tree_test_basic_comp), tjoin%blackheight()
+    call traverse(tjoin,'tjoin')
+    call tjoin%graphviz('tree_join',get_node_label)
+    print '("Allocated nodes counter ",i0)', allocation_counter
+
+    ! SPLIT
+    print *
+    print *, 'SPLIT'
+    call split2(tsl%root, sk%root, tsr%root, tjoin%root, transfer(KSPLIT,mold), tree_test_basic_comp)
+    call tsl%graphviz('left_split',get_node_label)
+    call tsr%graphviz('right_split',get_node_label)
+    call traverse(tsl,'split L')
+    call traverse(tsr,'split R')
+    call traverse(sk,'split key')
+    print '("Black height of stl/str: ",l2,1x,i0," | ",l2,1x,i0)', &
+        tsl%isvalid(tree_test_basic_comp), tsl%blackheight(), tsr%isvalid(tree_test_basic_comp), tsr%blackheight()
+    print '("Allocated nodes counter ",i0)', allocation_counter
+
   end subroutine tree_test_playground
 
 

@@ -1,7 +1,9 @@
 ### Red-black tree
 
-- [ ] join and split
-- [ ] black height
-- [ ] allow that root is red
-- [ ] automatic testing
+- [x] join and split
+- [ ] optimize join+split process (no reallocations)
+- [x] black height
+- [x] allow that root is red
+- [x] union  (with test)
+- [ ] insert and delete tests
 

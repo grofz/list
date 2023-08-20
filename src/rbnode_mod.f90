@@ -53,6 +53,7 @@ module rbnode_mod
   public rbnode_insert, rbnode_delete
   public rbnode_validate, rbnode_blackheight
   public join, split, union
+  public join2, split2
 
   integer, public, save :: allocation_counter = 0
     !! temporary, just for mem.leakage debuging TODO
@@ -1137,6 +1138,263 @@ allocation_counter=allocation_counter-1
   end function join
 
 
+  function join2(tl, k, tr) result(tjoin)
+    !* Join two sub-trees and return the pointer to a root of a new tree.
+    !
+    !  Note: all nodes in the left subtree must have key less than "key", and
+    !  all nodes in the right subtree must have key greater than "key" !
+    !
+    type(rbnode_t), intent(in), pointer :: tl, tr, k
+    type(rbnode_t), pointer :: tjoin
+
+    if (.not. associated(k)) error stop 'join - nill key node'
+
+    ! Assert both nodes are roots
+    if (associated(tl)) then
+      if (associated(tl%parent)) error stop 'join: tl is not root'
+    end if
+    if (associated(tr)) then
+      if (associated(tr%parent)) error stop 'join: tr is not root'
+    end if
+    if ( associated(k%parent)) error stop 'join - key node must be root'
+
+    if (rbnode_blackheight(tl) > rbnode_blackheight(tr)) then
+      tjoin => join_right2(tl, k, tr)
+      ! tjoin tree should contain at least a key node as a minimum
+      if ((rbnode_isblack(tjoin) .eqv. RED_COLOUR) .and. &
+          (rbnode_isblack(tjoin%right) .eqv. RED_COLOUR )) &
+          tjoin%isblack = BLACK_COLOUR
+      return
+    end if
+
+    if (rbnode_blackheight(tl) < rbnode_blackheight(tr)) then
+     tjoin => join_left2(tl, k, tr)
+     if ((rbnode_isblack(tjoin) .eqv. RED_COLOUR) .and. &
+         (rbnode_isblack(tjoin%left) .eqv. RED_COLOUR )) &
+         tjoin%isblack = BLACK_COLOUR
+     return
+    end if
+
+    ! both trees have the same black height
+    if ((rbnode_isblack(tl) .eqv. BLACK_COLOUR) .and. &
+        (rbnode_isblack(tr) .eqv. BLACK_COLOUR)) then
+      tjoin => connect(tl, k, RED_COLOUR, tr)
+    else
+      tjoin => connect(tl, k, BLACK_COLOUR, tr)
+    end if
+  end function join2
+
+
+  recursive function join_right2(tl, k, tr) result(tjoin)
+    type(rbnode_t), intent(in), pointer :: tl, tr, k
+    type(rbnode_t), pointer :: tjoin
+
+    type(rbbasetree_t) :: t
+    logical(int8) :: tl_isblack
+
+print *, 'in join_right2  ',print_node(tl)//print_node(k)//print_node(tr)
+    ! Assert both nodes are roots
+    if (associated(tl)) then
+      if (associated(tl%parent)) error stop 'join_right: tl is not root'
+    end if
+    if (associated(tr)) then
+      if (associated(tr%parent)) error stop 'join_right: tr is not root'
+    end if
+
+    tl_isblack = rbnode_isblack(tl)
+
+    if (tl_isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
+      tjoin => connect(tl, k, RED_COLOUR, tr)
+      return
+    end if
+
+    t%root => connect(tl%left, tl, tl%isblack, join_right2(tl%right, k, tr))
+
+    if (tl_isblack .and. &
+       ((rbnode_isblack(t%root%right) .eqv. RED_COLOUR) .and. &
+        (rbnode_isblack(t%root%right%right) .eqv. RED_COLOUR))) then
+      t%root%right%right%isblack = BLACK_COLOUR
+      tjoin => rotate_left(t%root, t)
+    else
+      tjoin => t%root
+    end if
+  end function join_right2
+
+
+  recursive function join_left2(tl, k, tr) result(tjoin)
+    type(rbnode_t), intent(in), pointer :: tl, tr, k
+    type(rbnode_t), pointer :: tjoin
+
+    type(rbbasetree_t) :: t
+    logical(int8) :: tr_isblack
+
+print *, 'in join_left2  ',print_node(tl)//print_node(k)//print_node(tr)
+    ! Assert both nodes are roots
+    if (associated(tl)) then
+      if (associated(tl%parent)) error stop 'join_left: tl is not root'
+    end if
+    if (associated(tr)) then
+      if (associated(tr%parent)) error stop 'join_left: tr is not root'
+    end if
+
+    tr_isblack = rbnode_isblack(tr)
+
+    if (tr_isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
+      tjoin => connect(tl, k, RED_COLOUR, tr)
+      return
+    end if
+
+    t%root => connect(join_left2(tl, k, tr%left), tr, tr%isblack, tr%right) 
+
+    if (tr_isblack .and. &
+       ((rbnode_isblack(t%root%left) .eqv. RED_COLOUR) .and. &
+        (rbnode_isblack(t%root%left%left) .eqv. RED_COLOUR))) then
+      t%root%left%left%isblack = BLACK_COLOUR
+      tjoin => rotate_right(t%root, t)
+    else
+      tjoin => t%root
+    end if
+  end function join_left2
+
+
+  function connect(left, root, colour, right) result(new)
+    type(rbnode_t), pointer, intent(in) :: left, root, right
+    logical(int8), intent(in) :: colour
+    type(rbnode_t), pointer :: new
+
+    if (.not. associated(root)) error stop 'connect: root node nil'
+    new => root
+
+    if (associated(new%left, left)) then
+      continue
+    else if (.not. associated(new%left)) then
+      new%left => left
+    else
+      print '("CONNECT ERR: left ptr chng ",a)', print_node(new%left)//'->'//print_node(left)
+      new%left => left
+    end if
+
+    if (associated(new%right, right)) then
+      continue
+    else if (.not. associated(new%right)) then
+      new%right => right
+    else
+      print '("CONNECT ERR: righ ptr chng ",a)', print_node(new%right)//'->'//print_node(right)
+      new%right => right
+    end if
+
+    new%isblack = colour
+
+    if (associated(new%left)) then
+      if (associated(new%left%parent, new)) then
+        continue
+      else if (.not. associated(new%left%parent)) then
+        new%left%parent => new
+      else 
+        print *, '("CONNECT ERR left par ptr chng '//print_node(new%left%parent)//'->'//print_node(new)
+      end if
+    end if
+
+    if (associated(new%right)) then
+      if (associated(new%right%parent, new)) then
+        continue
+      else if (.not. associated(new%right%parent)) then
+        new%right%parent => new
+      else
+        print *, '("CONNECT ERR right par ptr chng '//print_node(new%right%parent)//'->'//print_node(new)
+      end if
+    end if
+  end function connect
+
+
+  recursive subroutine split2(l, k, r, t, key, cfun)
+    !* Split tree. Nodes with a value less than "key" go to the left subtree,
+    !  and nodes with a value larger than "key" go to the right subtree.
+    !
+    !  If tree contains a node with the same value as "key", this node will not
+    !  be included in any of the sub-trees. This node can be accessed through the
+    !  returned pointer "key_node" and it can be freed or inserted to any of the
+    !  subtrees as needed.
+    !
+    type(rbnode_t), pointer, intent(inout) :: l, r, k
+      !! left and right sub-trees, key node if was present in "t"
+    type(rbnode_t), pointer, intent(in) :: t
+    integer(DATA_KIND), intent(in) :: key(:)
+    procedure(compare_fun) :: cfun
+    type(rbnode_t), pointer :: tmp
+
+    nullify(l, k, r)
+    if (.not. associated(t)) then
+      l => null(); k => null(); r => null()
+      return
+    end if
+
+    ! assert T is already a root of a tree
+    if (associated(t%parent)) error stop 'split - working node must be root'
+
+    select case(cfun(key, rbnode_read(t)))
+    case(0) ! key == old_root%key
+print *, 'split found key ', print_node(t)
+      l => t%left
+      if (associated(l)) l%parent=>null()
+      r => t%right
+      if (associated(r)) r%parent=>null()
+
+      ! the key-node will no longer be part of any sub-tree
+      k => t
+      k%left => null() ! TODO reconsider!!!
+      k%right => null()
+      k%parent => null()
+
+    case(-1) ! key < old_root%key
+      tmp => t%right
+      if (associated(t%left)) t%left%parent=>null()
+      if (associated(t%right)) t%right%parent=>null()
+      call split2(l, k, r, t%left, key, cfun)
+      nullify(t%left, t%right)
+      r => join2(r, t, tmp)
+
+      ! TODO is this needed?
+      ! While "join" returns a correct root node, the parent pointer of the root
+      ! to the other tree must be nullified here. 
+      if (associated(l)) then
+        select case(rbnode_whichchild(l))
+        case(LEFT_CHILD)
+          l%parent%left => null()
+          l%parent => null()
+        case(RIGHT_CHILD)
+          l%parent%right => null()
+          l%parent => null()
+        case(NO_PARENT)
+        end select
+      end if
+
+    case(+1) ! key > old_root%key
+      if (associated(t%right)) t%right%parent=>null()
+      if (associated(t%left)) t%left%parent=>null()
+      call split2(l, k, r, t%right, key, cfun)
+      tmp => t%left
+      nullify(t%left, t%right)
+      l => join2(tmp, t, l)
+
+      if (associated(r)) then
+        select case(rbnode_whichchild(r))
+        case(LEFT_CHILD)
+          r%parent%left => null()
+          r%parent => null()
+        case(RIGHT_CHILD)
+          r%parent%right => null()
+          r%parent => null()
+        case(NO_PARENT)
+        end select
+      end if
+
+    case default
+      error stop 'split: user function returned invalid value'
+    end select
+  end subroutine split2
+
+
   recursive subroutine split(l_root, key_node, r_root, old_root, key, cfun)
     !* Split tree. Nodes with a value less than "key" go to the left subtree,
     !  and nodes with a value larger than "key" go to the right subtree.
@@ -1408,5 +1666,18 @@ allocation_counter=allocation_counter-1
     call visit_nodes_graphviz(current%leftnode(), fid, .false., get_node_label)
     call visit_nodes_graphviz(current%rightnode(), fid, .false., get_node_label)
   end subroutine visit_nodes_graphviz
+
+
+  function print_node(node) result(str)
+    type(rbnode_t), pointer :: node
+    character(len=:), allocatable :: str
+    character(len=21) :: str0 
+    if (associated(node)) then
+      write(str0,*) transfer(rbnode_read(node),1)
+    else 
+      str0='nil'
+    end if
+    str = trim(adjustl(str0))
+  end function print_node
 
 end module rbnode_mod
