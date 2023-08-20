@@ -1,56 +1,101 @@
 module tree_test_mod
   use common_mod, only : mold, DATA_KIND
   use rbnode_mod
+  use quicksort_module
+  use mergesort_module
   implicit none
 
 contains
 
   subroutine tree_test_union()
-    integer, parameter, dimension(*) :: &
-        DAT1=[10, 1, 5, 13], &
-        DAT2=[1, 9, 10, 6, 13]
+   !integer, parameter, dimension(*) :: &
+   !   DAT1=[10, 1, 5, 13], & ! these give memory leak
+   !   DAT2=[1, 9, 10, 6, 13]
+    logical, parameter :: GRAPHVIZ = .true.
+    integer, parameter :: NMAX=100, N1=20, N2=35
+
+    integer, allocatable :: x1(:), x2(:), x12(:)
     type(rbbasetree_t) :: t1, t2, t12
     type(rbnode_t), pointer :: found
-    integer :: i
+    integer :: i, j, last
+    logical :: passed 
 
-    do i=1, size(DAT1)
-      call rbnode_insert(t1, rbnode_t(transfer(DAT1(i),mold)), tree_test_basic_comp)
-    end do
-    do i=1, size(DAT2)
-      call rbnode_insert(t2, rbnode_t(transfer(DAT2(i),mold)), tree_test_basic_comp)
-    end do
-    call dump_graphviz('our_a', t1)
-    call dump_graphviz('our_b', t2)
-    print *
-    print *, 'Traverse A'
-    call traverse(t1)
-    print *
-    print *, 'Traverse B'
-    call traverse(t2)
+    800 format(a,": nodes = ",i0,"  black_h = ",i0,"  valid? ",l2)
 
-    print *, 'UNION'
+    ! Prepare input trees
+    x1 = get_array(NMAX)
+    x2 = get_array(NMAX)
+    x1 = shuffle_array(x1)
+    x2 = shuffle_array(x2)
+    
+    do i=1, max(N1, N2) ! Insert nodes
+      if (i<=N1) call rbnode_insert(t1, rbnode_t(transfer(x1(i),mold)), tree_test_basic_comp)
+      if (i<=N2) call rbnode_insert(t2, rbnode_t(transfer(x2(i),mold)), tree_test_basic_comp)
+    end do
+
+    print 800, 'Tree 1', N1, t1%blackheight(), t1%isvalid(tree_test_basic_comp)
+    print 800, 'Tree 2', N2, t2%blackheight(), t2%isvalid(tree_test_basic_comp)
+    passed = t1%isvalid(tree_test_basic_comp) .and. t2%isvalid(tree_test_basic_comp)
+    print '("Allocated nodes counter ",i0)', allocation_counter
+
+    if (GRAPHVIZ) call dump_graphviz('tree_1', t1)
+    if (GRAPHVIZ) call dump_graphviz('tree_2', t2)
+    !call traverse(t1)
+    !call traverse(t2)
+
+    ! Make independent union
+    call quicksort(x1(1:N1))
+    call quicksort(x2(1:N2))
+    allocate(x12(N1+N2))
+    call merge(x1(1:N1), x2(1:N2), x12)
+
+    j = 0
+    last = -huge(last)
+    do i=1, size(x12)
+      ! skip duplicit elements
+      if (x12(i)==last) cycle
+      last = x12(i)
+      j = j + 1
+      if (i/=j) x12(j) = x12(i)
+    end do
+   !print 900,'x1  = ', x1(1:N1)
+   !print 900,'x2  = ', x2(1:N2)
+   !print 900,'x12 = ', x12(1:j)
+   !900 format(a,*(i0.2,:,1x))
+
+    print '("N1 = ",i0,"  N2 = ",i0,"  N12 = ",i0,"  commons = ",i0)', &
+        N1, N2, j, N1+N2-j
+
+    ! Now make union of two trees
+    print '("Calling Union...")'
     t12%root => union(t1%root, t2%root, tree_test_basic_comp)
 
-    print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
-        t12%isvalid(tree_test_basic_comp), t12%blackheight()
-    print *
-    print *, 'Traverse A+B'
-    call traverse(t12)
-    call dump_graphviz('our_ab', t12)
+    print 800,'Tree 1+2', -1, t12%blackheight(), t12%isvalid(tree_test_basic_comp)
+    print '("Allocated nodes counter ",i0)', allocation_counter
+    if (GRAPHVIZ) call dump_graphviz('tree_1+2', t12)
+    passed = passed .and. t12%isvalid(tree_test_basic_comp)
 
-    ! Delete
-    do i=1,size(DAT1)
-      call rbnode_delete(t12, rbnode_find(t12%root, transfer(DAT1(i),mold), tree_test_basic_comp))
-    end do
-    do i=1,size(DAT2)
-      found => rbnode_find(t12%root, transfer(DAT2(i),mold), tree_test_basic_comp)
-      if (associated(found)) call rbnode_delete(t12, found)
+    ! Now compare nodes in T12 with x12 by trying to remove them all
+    do i=1,j ! Remove nodes
+      found => rbnode_find(t12%root, transfer(x12(i),mold), tree_test_basic_comp)
+      if (associated(found)) then
+        call rbnode_delete(t12, found)
+      else
+        passed = .false.
+        print *, 'missing item = ',x12(i)
+      end if
     end do
 
-    print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
-        t12%isvalid(tree_test_basic_comp), t12%blackheight()
-    print *, 'Allocated nodes zero?  =', allocation_counter
-    
+    print 800, 'After deletion', -1, t12%blackheight(), t12%isvalid(tree_test_basic_comp)
+    print '("Allocated nodes counter ",i0)', allocation_counter
+
+    passed = passed .and. .not. associated(t12%root) .and. allocation_counter==0
+    if (passed) then
+      print '("Union test: PASS")'
+    else
+      print '("Union test: FAIL")'
+    end if
+
   end subroutine tree_test_union
 
 

@@ -5,3 +5,7 @@ FORD: https://forddocs.readthedocs.io/en/latest/
 Sorting linked-list: https://www.geeksforgeeks.org/merge-sort-for-linked-list/
 
 Red-black tree: https://en.wikipedia.org/wiki/Red%E2%80%93black_tree
+
+Set operations: https://en.wikipedia.org/wiki/Join-based_tree_algorithms
+
+Help with Git: https://www.nobledesktop.com/learn/git/undo-changes

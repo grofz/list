@@ -1165,15 +1165,14 @@ allocation_counter=allocation_counter-1
     case(0) ! key == old_root%key
       l_root => old_root%left
       if (associated(l_root)) l_root%parent=>null()
+      r_root => old_root%right
+      if (associated(r_root)) r_root%parent=>null()
 
       ! the key-node will no longer be part of any sub-tree
       key_node => old_root
       key_node%left => null()
       key_node%right => null()
       key_node%parent => null()
-
-      r_root => old_root%right
-      if (associated(r_root)) r_root%parent=>null()
 
     case(-1) ! key < old_root%key
       call split(ltmp, key_node, rtmp, old_root%left, key, cfun)
@@ -1207,44 +1206,34 @@ allocation_counter=allocation_counter-1
   end subroutine split
 
 
-  recursive function union(t1, t2, cfun) result(t)
-    type(rbnode_t), pointer, intent(in) :: t1, t2
+  recursive function union(t1, t2, cfun) result(t12)
+    type(rbnode_t), pointer, intent(inout) :: t1, t2
     procedure(compare_fun) :: cfun
-    type(rbnode_t), pointer :: t
+    type(rbnode_t), pointer :: t12
 
-    type(rbnode_t), pointer :: l1, r1, key_node, left, right, other_node
-    integer(DATA_KIND), allocatable :: key(:)
+    type(rbnode_t), pointer :: l2, r2, key2, l12, r12
 
     if (.not. associated(t1)) then
-      t => t2
+      t12 => t2
       return
     else if (.not. associated(t2)) then
-      t => t1
+      t12 => t1
       return
     end if
 
-  print *, 'pre-split', transfer(rbnode_read(t1),1), allocation_counter
-    key = rbnode_read(t1)
-    call split(l1, key_node, r1, t2, key, cfun)
-    other_node => rbnode_find(t1, key, cfun)
-  print *, 'exp-split - key_node', associated(key_node), associated(other_node), allocation_counter
+    call split(l2, key2, r2, t2, rbnode_read(t1), cfun)
 
-    ! one independent branch (for MPI?)
-    left => union(t1%left, l1, cfun)
-
-    ! second independent branch
-    right => union(t1%right, r1, cfun)
+    ! these two branches can run independently (paralelization?)
+    l12 => union(t1%left, l2, cfun)
+    r12 => union(t1%right, r2, cfun)
 
     ! as soon as both branches are complete
+    t12 => join(l12, rbnode_read(t1), r12)
 
-print *, 'pre-join', transfer(key,1), allocation_counter
-    t => join(left, key, right)
-    if (associated(key_node)) then
-      call rbnode_free(key_node)
-    end if
-    call rbnode_free(other_node)
-print *, 'ex-join', transfer(key,1), allocation_counter
-print *
+    ! as root of "t1" is re-created by join, it must be removed
+    ! if T2 contained the same key, it must be removed as well
+    call rbnode_free(t1)
+    if (associated(key2)) call rbnode_free(key2)
   end function union
 
 
