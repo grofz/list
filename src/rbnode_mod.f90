@@ -7,7 +7,7 @@ module rbnode_mod
   !*
   !
   !
-  use common_mod, only : DATA_KIND, mold, compare_fun
+  use common_mod, only : DATA_KIND, mold, compare_fun, get_node_label_fun
   use iso_fortran_env, only : int8
   implicit none
   private
@@ -36,6 +36,8 @@ module rbnode_mod
   contains
     procedure :: isvalid => rbbasetree_isvalid
     procedure :: blackheight => rbbasetree_blackheight
+    procedure :: size => rbbasetree_size
+    procedure :: graphviz => rbbasetree_graphviz
   end type rbbasetree_t
 
   integer, parameter :: LEFT_CHILD=1, RIGHT_CHILD=2, NO_PARENT=0
@@ -1240,6 +1242,20 @@ allocation_counter=allocation_counter-1
   ! ================================
   ! Validation and debugging helpers
   ! ================================
+  function rbbasetree_size(this) result(n)
+    class(rbbasetree_t), intent(in) :: this
+    integer :: n
+    n = rbnode_size(this%root)
+  end function rbbasetree_size
+
+  recursive function rbnode_size(node) result(n)
+    type(rbnode_t), pointer, intent(in) :: node
+    integer :: n
+    n = 0
+    if (.not. associated(node)) return
+    n = 1 + rbnode_size(node%left) + rbnode_size(node%right)
+  end function rbnode_size
+
 
   function rbbasetree_isvalid(this, cfun) result(isvalid)
     class(rbbasetree_t), intent(in) :: this
@@ -1250,7 +1266,6 @@ allocation_counter=allocation_counter-1
 
     call rbnode_validate(this%root, cfun, isvalid, nblacks)
   end function rbbasetree_isvalid
-
 
   recursive subroutine rbnode_validate(root, cfun, isvalid, nblacks)
     type(rbnode_t), intent(in), pointer :: root
@@ -1293,9 +1308,14 @@ allocation_counter=allocation_counter-1
     if (associated(root%right)) isvalid_bst = isvalid_bst .and. &
         cfun(rbnode_read(root), rbnode_read(root%right)) == -1
     isvalid = isvalid .and. isvalid_bst
-
   end subroutine rbnode_validate
 
+
+  function rbbasetree_blackheight(this) result(bh)
+    class(rbbasetree_t), intent(in) :: this
+    integer :: bh
+    bh = rbnode_blackheight(this%root)
+  end function rbbasetree_blackheight
 
   function rbnode_blackheight(node) result(bh)
     !* The black height of a red–black tree is the number of black nodes in any
@@ -1317,10 +1337,76 @@ allocation_counter=allocation_counter-1
   end function rbnode_blackheight
 
 
-  function rbbasetree_blackheight(this) result(bh)
+  subroutine rbbasetree_graphviz(this, basename, get_node_label)
+    !! Make a PNG image of the red-black tree using an external application
     class(rbbasetree_t), intent(in) :: this
-    integer :: bh
-    bh = rbnode_blackheight(this%root)
-  end function rbbasetree_blackheight
+    character(len=*), intent(in) :: basename
+    procedure(get_node_label_fun) :: get_node_label
+
+    character(len=*), parameter :: SUFTXT='gv.txt', SUFPNG='.png'
+    integer, parameter :: TREE_SIZE_LIMIT = 1000
+    integer :: fid, cmdstat, exitstat, tree_size
+    character(len=200) cmdmsg
+
+    ! sanity check to not draw too large trees
+    tree_size = this%size()
+    if (tree_size> TREE_SIZE_LIMIT) then
+      print '("graphviz: tree size ",i0," is too large to be shown as PNG image")',&
+          tree_size
+      return
+    end if
+
+    ! write tree to a temporary file...
+    open(newunit=fid, file=basename//SUFTXT, status='replace')
+    write(fid,'(a,/,a)') 'digraph {','node [fontname="Arial"];'
+    call visit_nodes_graphviz(this%root, fid, .true., get_node_label)
+    write(fid,'(a)') '}'
+    flush(fid)
+
+    ! ...and then try to call 'dot' application
+    call execute_command_line('dot -Tpng < '//basename//SUFTXT//' > '//basename//SUFPNG, &
+        exitstat=exitstat, cmdstat=cmdstat, cmdmsg=cmdmsg)
+    if (exitstat==0 .and. cmdstat==0) then
+      ! if graph was rendered to PNG, the file is of no use anymore
+      close(fid, status='delete')
+    else
+      ! in case of an error, keep the file
+      close(fid)
+      print '("Call to DOT failed: """,a,"""")', trim(cmdmsg)
+    end if
+  end subroutine rbbasetree_graphviz
+
+
+  recursive subroutine visit_nodes_graphviz(current, fid, isrootlevel, get_node_label)
+    type(rbnode_t), pointer, intent(in) :: current
+    integer, intent(in) :: fid
+    logical, intent(in) :: isrootlevel
+    procedure(get_node_label_fun) :: get_node_label
+
+    type(rbnode_t), pointer :: par
+    character(len=:), allocatable :: label_cur, label_par
+
+    if (.not. associated(current)) then
+      if (isrootlevel) write(fid,'(a)') '"empty tree" [color=gray]'
+      return
+    end if
+
+    label_cur = get_node_label(rbnode_read(current))
+
+    if (.not. current%is_node_black()) then
+      write(fid,'(a)') trim(adjustl(label_cur))//' [color=red]'
+    else if (isrootlevel .and. .not. associated(current%leftnode()) .and. .not. associated(current%rightnode())) then
+      write(fid,'(a)') trim(adjustl(label_cur))
+    end if
+
+    par => current%upnode()
+    if (associated(par)) then
+      label_par = get_node_label(rbnode_read(par))
+      write(fid,'(a)') trim(adjustl(label_par))//' -> '//trim(adjustl(label_cur))
+    end if
+
+    call visit_nodes_graphviz(current%leftnode(), fid, .false., get_node_label)
+    call visit_nodes_graphviz(current%rightnode(), fid, .false., get_node_label)
+  end subroutine visit_nodes_graphviz
 
 end module rbnode_mod

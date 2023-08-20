@@ -23,12 +23,19 @@ module common_mod
       ! *  0 if A equals B;
       !
       ! * +1 if A is greater than B
-      import :: DATA_KIND, mold
+      import :: DATA_KIND
       implicit none
       integer(DATA_KIND), dimension(:), intent(in) :: adat, bdat
       integer :: ires
     end function
+
+    function get_node_label_fun(dat) result(label)
+      import DATA_KIND
+      implicit none
+      integer(DATA_KIND), intent(in) :: dat(:)
+      character(len=:), allocatable :: label
+    end function get_node_label_fun
   end interface
-  public compare_fun
+  public compare_fun, get_node_label_fun
 
 end module common_mod
