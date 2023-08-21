@@ -104,14 +104,16 @@ contains
   end subroutine tree_test_union
 
 
+
+
   subroutine tree_test_joinsplit()
     type(rbbasetree_t) :: t1, t2, t12, k
-    type(rbnode_t), pointer :: cursor1, cursor2
+    type(rbnode_t), pointer :: cursor1, cursor2, cursork
     integer, allocatable :: x(:)
     integer :: i, isplit
-    logical :: passed
+    logical :: passed, rejoined
     real :: time(2), xr
-    integer, parameter :: N=50 
+    integer, parameter :: N=25000000 
     
     800 format(a,": nodes = ",i0,"  black_h = ",i0,"  valid? ",l2)
 
@@ -128,7 +130,7 @@ contains
     end do
     call end_stopwatch(time)
 
-    print 800, 'Tree 12', t12%size(), t12%blackheight(), t12%isvalid(tree_test_basic_comp)
+    print 800, 'tree', t12%size(), t12%blackheight(), t12%isvalid(tree_test_basic_comp)
     passed = t12%isvalid(tree_test_basic_comp)
     print '("Allocated nodes counter ",i0)', allocation_counter
 
@@ -141,89 +143,113 @@ contains
     call split2(t1%root, k%root, t2%root, t12%root, transfer(isplit,mold), tree_test_basic_comp)
     call end_stopwatch(time)
 
-    print 800, 'Tree 1', t1%size(), t1%blackheight(), t1%isvalid(tree_test_basic_comp)
-    print 800, 'Tree 2', t2%size(), t2%blackheight(), t2%isvalid(tree_test_basic_comp)
-    passed = passed .and. t1%isvalid(tree_test_basic_comp) .and. t2%isvalid(tree_test_basic_comp)
+    print 800, 'splitted left', t1%size(), t1%blackheight(), t1%isvalid(tree_test_basic_comp)
+    print 800, 'splitted right', t2%size(), t2%blackheight(), t2%isvalid(tree_test_basic_comp)
+    passed = passed .and. t1%isvalid(tree_test_basic_comp) .and. &
+        t2%isvalid(tree_test_basic_comp) .and. k%isvalid(tree_test_basic_comp)
     call t1%graphviz('tree_1', get_node_label)
     call t2%graphviz('tree_2', get_node_label)
-    call traverse(t1, 'L')
-    call traverse(t2, 'R')
+    !call traverse(t1, 'L')
+    !call traverse(t2, 'R')
     call traverse(k,  'K')
     print '("Allocated nodes counter ",i0)', allocation_counter
 
-    stop
+    ! verify split did not loose any nodes
+    call start_stopwatch('verifying splits',time)
+    cursor1 => t1%leftmost()
+    cursor2 => t2%leftmost()
+    cursork => k%leftmost()
+    do i=1, N
+      if (x(i)<isplit) then
+        if (associated(cursor1)) then
+          passed = passed .and. transfer(rbnode_read(cursor1),1)==x(i)
+          cursor1 => cursor1%nextnode()
+          cycle
+        end if
+      else if (x(i)>isplit) then
+        if (associated(cursor2)) then
+          passed = passed .and. transfer(rbnode_read(cursor2),1)==x(i)
+          cursor2 => cursor2%nextnode()
+          cycle
+        end if
+      else ! x(i)==isplit
+        if (associated(cursork)) then
+          passed = passed .and. transfer(rbnode_read(cursork),1)==x(i)
+          cursork => cursork%nextnode()
+          cycle
+        end if
+      end if
+      passed = .false.
+    end do
+    ! all cursors must be byond the last node
+    passed = passed .and. (.not. associated(cursor1)) .and. (.not. associated(cursor2)) .and. (.not. associated(cursork))
+    call end_stopwatch(time)
 
-    print 800, 'Tree 12', t12%size(), t12%blackheight(), t12%isvalid(tree_test_basic_comp)
-    passed = t12%isvalid(tree_test_basic_comp)
+    ! JOIN trees again (if split was not in tree, we skip this part)
+    if (k%size()>0) then
+      call start_stopwatch('re-joining trees',time)
+      t12%root => join2(t1%root, k%root, t2%root)
+      call end_stopwatch(time)
+
+      print 800, 're-joined', t12%size(), t12%blackheight(), t12%isvalid(tree_test_basic_comp)
+      passed = passed .and. t12%isvalid(tree_test_basic_comp)
+      call t1%graphviz('tree_12', get_node_label)
+      call traverse(t12, 'L+R')
+
+      ! check that all nodes are present in the joined tree
+      call start_stopwatch('verifying re-join',time)
+      cursor1 => t12%leftmost()
+      do i=1, N
+        if (associated(cursor1)) then
+          passed = passed .and. transfer(rbnode_read(cursor1),1)==x(i)
+          cursor1 => cursor1%nextnode()
+          cycle
+        end if
+        passed = .false.
+      end do
+      ! cursors must be byond the last node
+      passed = passed .and. (.not. associated(cursor1))
+      call end_stopwatch(time)
+      rejoined = .true.
+    else
+      print '("join operation skipped, rerun test if needed")'
+      rejoined = .false.
+    end if
+
+    ! Delete all trees
+    call start_stopwatch('deleting nodes', time)
+    if (rejoined) then
+      call delete_whole_tree(t12)
+    else
+      call delete_whole_tree(t1)
+      call delete_whole_tree(t2)
+    end if
+    call end_stopwatch(time)
     print '("Allocated nodes counter ",i0)', allocation_counter
+    passed = passed .and. allocation_counter==0
 
+    if (passed) then
+      print '("Join/Split test: PASS")'
+    else
+      print '("Join/Split test: FAIL")'
+    end if
 
-   !print '("Insertion L - Valid? ",L2," black height is ",i0)', &
-   !    tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
-
-   !do i=NTOT, IMID+1, -2
-    !do i=NMID+1, NRIGHT
-   !  call rbnode_insert(tree_b, rbnode_t(transfer(i,mold)), tree_test_basic_comp, ierr)
-   !  if (ierr/=0) print *, 'Insert ierr = ',ierr
-   !end do
-   !print '("Insertion R - Valid? ",L2," black height is ",i0)', &
-   !    tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
-
-   !call tree_a%graphviz('our_a', get_node_label)
-   !call tree_b%graphviz('our_b', get_node_label)
-   !call traverse(tree_a,'tree_a')
-   !call traverse(tree_b,'tree_b')
-
-   !tree_ab%root => join(tree_a%root, transfer(IMID,mold), tree_b%root)
-   !print '("Join L+R    - Valid? ",L2," black height is ",i0)', &
-   !    tree_ab%isvalid(tree_test_basic_comp), tree_ab%blackheight()
-
-   !call tree_ab%graphviz('our_ab', get_node_label)
-   !call traverse(tree_ab,'tree_ab')
-
-    ! Split
-   !print *
-   !print *, 'SPLIT'
-   !call split(tree_a%root,key_in_tree,tree_b%root, &
-   !    tree_ab%root, transfer(ISPLIT,mold), tree_test_basic_comp)
-   !print '("Split: key_in_tree ",L2)', associated(key_in_tree)
-   !if (associated(key_in_tree)) then
-   !  print *, 'Key =',transfer(rbnode_read(key_in_tree),i)
-   !  call rbnode_free(key_in_tree)
-   !end if
-   !print '("Insertion L - Valid? ",L2," black height is ",i0)', &
-   !    tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
-   !print '("Insertion R - Valid? ",L2," black height is ",i0)', &
-   !    tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
-   !call tree_a%graphviz('our_c', get_node_label)
-   !call tree_b%graphviz('our_d', get_node_label)
-   !call traverse(tree_b,'tree_b')
-   !call traverse(tree_a,'tree_a')
-
-    ! Delete everything
-    print *
-    print *, 'DELETE'
-   !do i=1,NRIGHT
-   !  call rbnode_delete(tree_ab, rbnode_find(tree_ab%root, transfer(i,mold), tree_test_basic_comp))
-   !end do
-   !do i=2,min(ISPLIT-1,NTOT),2
-   !  call rbnode_delete(tree_a, rbnode_find(tree_a%root, transfer(i,mold), tree_test_basic_comp))
-   !end do
-   !do i=ISPLIT+2-mod(ISPLIT,2), NTOT,2
-   !  call rbnode_delete(tree_b, rbnode_find(tree_b%root, transfer(i,mold), tree_test_basic_comp))
-   !end do
-
-   !print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
-   !    tree_ab%isvalid(tree_test_basic_comp), tree_ab%blackheight()
-   !print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
-   !    tree_a%isvalid(tree_test_basic_comp), tree_a%blackheight()
-   !print '("Empty tree    - Valid? ",L2," black height is ",i0)', &
-   !    tree_b%isvalid(tree_test_basic_comp), tree_b%blackheight()
-   !print *, 'Allocated nodes zero?  =', allocation_counter
+  contains
+    subroutine delete_whole_tree(tree)
+      type(rbbasetree_t), intent(inout) :: tree
+      type(rbnode_t), pointer :: cnow
+      do
+        cnow => tree%leftmost()
+        if (.not. associated(cnow)) exit
+        call rbnode_delete(tree, cnow)
+      end do
+    end subroutine
 
   end subroutine tree_test_joinsplit
 
 
+
+  
   subroutine tree_test_basic()
     integer, parameter, dimension(*) :: DATA=[10, 5, 7, 8, 9, 11, 12, 13]
     integer, parameter :: NSIZE = 52
@@ -289,7 +315,7 @@ contains
     integer, parameter, dimension(*) :: &
       x1 = [20, 4], &
       x2 = [40, 50, 60]
-    integer, parameter :: KEY=31, KSPLIT=30
+    integer, parameter :: KEY=31, KSPLIT=31
     integer :: i 
     
    do i=1, max(size(x1), size(x2)) ! Insert nodes

@@ -9,9 +9,9 @@ program test_dll
   end interface
 
   !call tree_test_basic()
-  !call tree_test_joinsplit()
+  call tree_test_joinsplit()
   !call tree_test_union()  ! NICE
-  call tree_test_playground
+  !call tree_test_playground
   stop
 
   call test1()
