@@ -51,10 +51,10 @@ module rbnode_mod
   public rbnode_update, rbnode_read, rbnode_free
   public rbnode_find
   public rbnode_leftmost, rbnode_nextnode, rbnode_prevnode
-  public rbnode_insert, rbnode_delete
+  public rbnode_insert, rbnode_delete, rbnode_freetree
   public rbnode_validate, rbnode_blackheight
   public join, split, union
-  public join2, split2
+  public join2, join22, split2, union2, intersection2, difference2
 
   integer, public, save :: allocation_counter = 0
     !! temporary, just for mem.leakage debuging TODO
@@ -136,6 +136,7 @@ allocation_counter=allocation_counter+1
   end function rbnode_new
 
 
+! TO BE REMOVED
   function rbnode_newroot(left, dat, colour, right) result(new)
     !! Allocate new node, fill it with given data and colour, and make
     !! it a root of two given sub-trees
@@ -1042,6 +1043,79 @@ allocation_counter=allocation_counter-1
   ! =============================
 !TODO: after testing, remove one of versions of the procedures
 
+  recursive subroutine rbnode_freetree(T)
+    type(rbnode_t), pointer, intent(inout) :: T
+
+    type(rbnode_t), pointer :: L, m, R
+
+    if (.not. associated(T)) return
+    if (associated(T%parent)) error stop 'freetree: node must be root'
+
+    call disconnect(L, m, R, T)
+    if (associated(m)) call rbnode_free(m)
+    call rbnode_freetree(L)
+    call rbnode_freetree(R)
+  end subroutine rbnode_freetree
+
+
+  function connect(left, node, right) result(root)
+    !! connect left and right subtrees as the children of "node"
+    type(rbnode_t), pointer, intent(in) :: left, node, right
+    type(rbnode_t), pointer :: root
+
+    if (.not. associated(node)) error stop 'connect: node is nil'
+
+    ! assert both sub-trees are roots
+    if (associated(left)) then
+      if (associated(left%parent)) error stop 'connect: left subtree is not root'
+    endif
+    if (associated(right)) then
+      if (associated(right%parent)) error stop 'connect: right subtree is not root'
+    end if
+
+    ! assert node is isolated
+    if (associated(node%parent) .or. associated(node%left) .or. associated(node%right)) &
+      error stop 'connect: node is not isolated'
+
+    ! make the connections
+    root => node
+    root%left => left
+    root%right => right
+    if (associated(root%left)) root%left%parent => root
+    if (associated(root%right)) root%right%parent => root
+  end function connect
+
+
+  subroutine disconnect(left, node, right, root)
+    !! Reverse operation to "connect": disconnect left and right subtrees from
+    !! the root, return pointers to both subtrees and the old root
+    type(rbnode_t), pointer, intent(out) :: left, node, right
+    type(rbnode_t), pointer, intent(in) :: root
+
+    ! assert root exists and that it is root
+    if (.not. associated(root)) error stop 'disconnect: root is nil'
+    if (associated(root%parent)) error stop 'disconnect: root is not root'
+
+    left => root%left
+    node => root
+    right => root%right
+
+    if (associated(left)) then
+      if (.not. associated(left%parent, node)) &
+          error stop 'disconnect: left child is not a child'
+      left%parent => null()
+      node%left => null()
+    end if
+    if (associated(right)) then 
+      if (.not. associated(right%parent, node)) &
+          error stop 'disconnect: right child is not a child'
+      right%parent => null()
+      node%right => null()
+    end if
+  end subroutine disconnect
+
+
+!TODO TO BE REMOVED
   recursive function re_root(left,root,right) result(newroot)
     !* Same job as "rbnode_newroot" but here we do not allocate any new memory.
     !  The existing memory of "root" is reused instead.
@@ -1058,6 +1132,7 @@ allocation_counter=allocation_counter-1
   end function re_root
 
 
+!TODO TO BE REMOVED
   recursive function join_right(tl, key, tr) result(newroot)
     type(rbnode_t), intent(in), pointer :: tl, tr
     integer(DATA_KIND), intent(in) :: key(:)
@@ -1086,6 +1161,7 @@ allocation_counter=allocation_counter-1
   end function join_right
 
 
+!TODO TO BE REMOVED
   recursive function join_left(tl, key, tr) result(newroot)
     type(rbnode_t), intent(in), pointer :: tl, tr
     integer(DATA_KIND), intent(in) :: key(:)
@@ -1114,6 +1190,7 @@ allocation_counter=allocation_counter-1
   end function join_left
 
 
+!TODO TO BE REMOVED
   function join(tl, key, tr) result(newroot)
     !* Join two sub-trees and return the pointer to a root of new tree. New
     !  node with "key" data is allocated during the process.
@@ -1276,63 +1353,6 @@ allocation_counter=allocation_counter-1
   end function join_left2
 
 
-  function connect(left, node, right) result(root)
-    !! connect left and right subtrees as the children of "node"
-    type(rbnode_t), pointer, intent(in) :: left, node, right
-    type(rbnode_t), pointer :: root
-
-    if (.not. associated(node)) error stop 'connect: node is nil'
-
-    ! assert both sub-trees are roots
-    if (associated(left)) then
-      if (associated(left%parent)) error stop 'connect: left subtree is not root'
-    endif
-    if (associated(right)) then
-      if (associated(right%parent)) error stop 'connect: right subtree is not root'
-    end if
-
-    ! assert node is isolated
-    if (associated(node%parent) .or. associated(node%left) .or. associated(node%right)) &
-      error stop 'connect: node is not isolated'
-
-    ! make the connections
-    root => node
-    root%left => left
-    root%right => right
-    if (associated(root%left)) root%left%parent => root
-    if (associated(root%right)) root%right%parent => root
-  end function connect
-
-
-  subroutine disconnect(left, node, right, root)
-    !! Reverse operation to "connect": disconnect left and right subtrees from
-    !! the root, return pointers to both subtrees and the old root
-    type(rbnode_t), pointer, intent(out) :: left, node, right
-    type(rbnode_t), pointer, intent(in) :: root
-
-    ! assert root exists and that it is root
-    if (.not. associated(root)) error stop 'disconnect: root is nil'
-    if (associated(root%parent)) error stop 'disconnect: root is not root'
-
-    left => root%left
-    node => root
-    right => root%right
-
-    if (associated(left)) then
-      if (.not. associated(left%parent, node)) &
-          error stop 'disconnect: left child is not a child'
-      left%parent => null()
-      node%left => null()
-    end if
-    if (associated(right)) then 
-      if (.not. associated(right%parent, node)) &
-          error stop 'disconnect: right child is not a child'
-      right%parent => null()
-      node%right => null()
-    end if
-  end subroutine disconnect
-
-
   recursive subroutine split2(l, k, r, t, key, cfun)
     !* Split tree. Nodes with a value less than "key" go to the left subtree,
     !  and nodes with a value larger than "key" go to the right subtree.
@@ -1378,6 +1398,7 @@ allocation_counter=allocation_counter-1
   end subroutine split2
 
 
+!TODO TO BE REMOVED
   recursive subroutine split(l_root, key_node, r_root, old_root, key, cfun)
     !* Split tree. Nodes with a value less than "key" go to the left subtree,
     !  and nodes with a value larger than "key" go to the right subtree.
@@ -1449,6 +1470,39 @@ allocation_counter=allocation_counter-1
   end subroutine split
 
 
+  recursive subroutine splitlast(Ts, m, T)
+    type(rbnode_t), pointer, intent(out) :: Ts, m
+    type(rbnode_t), pointer, intent(in) :: T
+
+    type(rbnode_t), pointer :: Ts1, m1, L, R
+
+    call disconnect(L, m, R, T)
+    if (.not. associated(R)) then
+      Ts => L
+    else
+      call splitlast(Ts1, m1, R)
+      Ts => join2(L, m, Ts1)
+      m => m1
+    end if
+  end subroutine splitlast
+
+
+  function join22(L, R) result(T)
+    type(rbnode_t), pointer, intent(in) :: L, R
+    type(rbnode_t), pointer :: T
+
+    type(rbnode_t), pointer :: Ls, m
+
+    if (.not. associated(L)) then
+      T => R
+    else
+      call splitlast(Ls, m, L)
+      T => join2(Ls, m, R)
+    end if
+  end function join22
+
+
+!TO BE REMOVED
   recursive function union(t1, t2, cfun) result(t12)
     type(rbnode_t), pointer, intent(inout) :: t1, t2
     procedure(compare_fun) :: cfun
@@ -1478,6 +1532,97 @@ allocation_counter=allocation_counter-1
     call rbnode_free(t1)
     if (associated(key2)) call rbnode_free(key2)
   end function union
+
+
+  recursive function union2(T1, T2, cfun) result(t12)
+    type(rbnode_t), pointer, intent(in) :: T1, T2
+    procedure(compare_fun) :: cfun
+    type(rbnode_t), pointer :: T12
+
+    type(rbnode_t), pointer :: L1, L2, L12, R1, R2, R12, m1, m2
+
+    if (.not. associated(T1)) then
+      T12 => T2
+      return
+    else if (.not. associated(T2)) then
+      T12 => T1
+      return
+    end if
+
+    call disconnect(L1, m1, R1, T1)
+    call split2(L2, m2, R2, T2, rbnode_read(m1), cfun)
+
+    ! these two branches can run independently (paralelization?)
+    L12 => union2(L1, L2, cfun)
+    R12 => union2(R1, R2, cfun)
+
+    T12 => join2(L12, m1, R12)
+    if (associated(m2)) call rbnode_free(m2)
+  end function union2
+
+
+  recursive function intersection2(T1, T2, cfun) result(T12)
+    type(rbnode_t), pointer, intent(inout) :: T1, T2
+    procedure(compare_fun) :: cfun
+    type(rbnode_t), pointer :: T12
+
+    type(rbnode_t), pointer :: L1, L2, L12, R1, R2, R12, m1, m2
+
+    T12 => null()
+    if (.not. associated(T1) .or. .not. associated(T2)) then
+      call rbnode_freetree(T1)
+      call rbnode_freetree(T2)
+      return
+    end if
+
+    call disconnect(L1, m1, R1, T1)
+    call split2(L2, m2, R2, T2, rbnode_read(m1), cfun)
+
+    ! these two branches can run independently (paralelization?)
+    L12 => intersection2(L1, L2, cfun)
+    R12 => intersection2(R1, R2, cfun)
+
+    if (associated(m2)) then
+      T12 => join2(L12, m1, R12)
+      call rbnode_free(m2)
+    else
+      T12 => join22(L12, R12)
+      call rbnode_free(m1)
+    end if
+  end function intersection2
+
+
+  recursive function difference2(T1, T2, cfun) result(T12)
+    type(rbnode_t), pointer, intent(inout) :: T1, T2
+    procedure(compare_fun) :: cfun
+    type(rbnode_t), pointer :: T12
+
+    type(rbnode_t), pointer :: L1, L2, L12, R1, R2, R12, m1, m2 
+
+    if (.not. associated(T1)) then
+      T12 => null()
+      call rbnode_freetree(T2)
+      return
+    else if (.not. associated(T2)) then
+      T12 => T1
+      return
+    end if
+
+    call disconnect(L1, m1, R1, T1)
+    call split2(L2, m2, R2, T2, rbnode_read(m1), cfun)
+
+    ! these two branches can run independently (paralelization?)
+    L12 => difference2(L1, L2, cfun)
+    R12 => difference2(R1, R2, cfun)
+
+    if (associated(m2)) then
+      T12 => join22(L12, R12)
+      call rbnode_free(m2)
+      call rbnode_free(m1)
+    else
+      T12 => join2(L12, m1, R12)
+    end if
+  end function difference2
 
 
   ! ================================
