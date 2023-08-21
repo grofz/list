@@ -1,11 +1,8 @@
-! Red-black tree implementation
-! -----------------------------------------------------
-! Algorithms based on this Wikipedia article:
-! https://en.wikipedia.org/wiki/Red%E2%80%93black_tree
-!
 module rbnode_mod
-  !*
-  !
+  !* Red-black tree implementation
+  !  Algorithms based on this Wikipedia articles:
+  !  - (https://en.wikipedia.org/wiki/Red%E2%80%93black_tree)
+  !  - (https://en.wikipedia.org/wiki/Join-based_tree_algorithms)
   !
   use common_mod, only : DATA_KIND, mold, compare_fun, get_node_label_fun
   use iso_fortran_env, only : int8
@@ -26,10 +23,11 @@ module rbnode_mod
     procedure :: nextnode => nextnode_tbp
   end type rbnode_t
   interface rbnode_t
-    module procedure rbnode_new, rbnode_newroot
+    module procedure rbnode_new
     !module procedure rbnode_import
     !module procedure rbnode_copy
   end interface
+
 
   type, public :: rbbasetree_t
     type(rbnode_t), pointer :: root => null()
@@ -50,10 +48,9 @@ module rbnode_mod
 
   public rbnode_update, rbnode_read, rbnode_free
   public rbnode_find
-  public rbnode_leftmost, rbnode_nextnode, rbnode_prevnode
+  public rbnode_leftmost, rbnode_successor, rbnode_predecessor
   public rbnode_insert, rbnode_delete, rbnode_freetree
   public rbnode_validate, rbnode_blackheight
-  public join, split, union
   public join2, join22, split2, union2, intersection2, difference2
 
   integer, public, save :: allocation_counter = 0
@@ -92,7 +89,7 @@ contains
     class(rbnode_t), intent(in), target :: this
     type(rbnode_t), pointer :: nn
     nn => this
-    nn => rbnode_nextnode(nn)
+    nn => rbnode_successor(nn)
   end function
 ! TODO prevnode, leftmost?, rightmost?
 
@@ -134,35 +131,6 @@ allocation_counter=allocation_counter+1
     new%right => null()
     new%parent => null()
   end function rbnode_new
-
-
-! TO BE REMOVED
-  function rbnode_newroot(left, dat, colour, right) result(new)
-    !! Allocate new node, fill it with given data and colour, and make
-    !! it a root of two given sub-trees
-    type(rbnode_t), intent(in), pointer :: left, right
-    integer(DATA_KIND), intent(in) :: dat(:)
-    logical(int8), intent(in) :: colour
-    type(rbnode_t), pointer :: new
-
-    integer :: ierr
-
-allocation_counter=allocation_counter+1
-    allocate(new, stat=ierr)
-    if (ierr /= 0) &
-        error stop 'could not allocate new rbtr node'
-    allocate(new%dat(size(dat)), stat=ierr)
-    if (ierr /= 0) &
-        error stop 'could not allocate data in new rbtr node'
-
-    new%dat = dat
-    new%isblack = colour
-    new%parent => null()
-    new%left => left
-    if (associated(new%left)) new%left%parent => new
-    new%right => right
-    if (associated(new%right)) new%right%parent => new
-  end function rbnode_newroot
 
 
   subroutine rbnode_update(node, newdata)
@@ -313,7 +281,7 @@ allocation_counter=allocation_counter-1
   end function rbnode_uncle
 
 
-  subroutine rehang_tree(oldchild, newchild, tree)
+  subroutine fix_link_at_parent(oldchild, newchild, tree)
     type(rbnode_t), pointer, intent(in) :: oldchild, newchild
     type(rbbasetree_t), intent(inout) :: tree
 
@@ -321,8 +289,8 @@ allocation_counter=allocation_counter-1
 
     ! Old child (pivot) exchanged place with new child (rotator) during the
     ! rotation. Here, we repair the parent->child link.
-    ! The other way link (child->parent) should have been updates in
-    ! rotate_...()
+    ! The other way link (child->parent) should have been updated in
+    ! rotate_left/right already
     parent => newchild%parent
 
     if (associated(parent)) then
@@ -332,22 +300,21 @@ allocation_counter=allocation_counter-1
       else if (associated(parent%right, oldchild)) then
         parent%right => newchild
       else
-        error stop 'rehang_tree - old child not recognized by parent'
+        error stop 'fix_link_at_parent - old child not recognized by parent'
       end if
     else
-      ! Pivot was root, and did not have any parent. Root-pointer must
-      ! be repaired instead
+      ! Pivot was root, and did not have any parent. Root-pointer in tree 
+      ! structure must be repaired instead
       if (.not. associated(tree%root, oldchild)) &
-          error stop 'rehang_tree - unexpected association of root pointer'
+          error stop 'fix_link_at_parent - unexpected association of root pointer'
       tree%root => newchild
     end if
-  end subroutine rehang_tree
+  end subroutine fix_link_at_parent
 
 
   function rotate_left(piv, tree) result(rot)
     !! Rotate left.
     !! Fails if pivot is leaf or if pivot's right child (rotator) is leaf
-    !! Remember: pivot's parent must be relinked to rotator outside!
     type(rbnode_t), intent(in), pointer :: piv
     type(rbbasetree_t), intent(inout) :: tree
     type(rbnode_t), pointer :: rot
@@ -375,14 +342,13 @@ allocation_counter=allocation_counter-1
     end if
     rot%left => piv
 
-    call rehang_tree(piv, rot, tree)
+    call fix_link_at_parent(piv, rot, tree)
   end function rotate_left
 
 
   function rotate_right(piv, tree) result(rot)
     !! Rotate right.
     !! Fails if pivot is leaf or if pivot's left child (rotator) is leaf
-    !! Remember: pivot's parent must be relinked to rotator outside!
     type(rbnode_t), intent(in), pointer :: piv
     type(rbbasetree_t), intent(inout) :: tree
     type(rbnode_t), pointer :: rot
@@ -410,11 +376,12 @@ allocation_counter=allocation_counter-1
     end if
     rot%right => piv
 
-    call rehang_tree(piv, rot, tree)
+    call fix_link_at_parent(piv, rot, tree)
   end function rotate_right
 
 
   function rbnode_leftmost(node) result(leftmost)
+    !! Get the left-most node in current sub-tree
     type(rbnode_t), intent(in), pointer :: node
     type(rbnode_t), pointer :: leftmost
 
@@ -454,21 +421,21 @@ allocation_counter=allocation_counter-1
   end function rbnode_rightmost
 
 
-  function rbnode_nextnode(node) result(successor)
+  function rbnode_successor(node) result(succ)
     !! Return next node, or null pointer if node is the last node
     type(rbnode_t), intent(in), pointer :: node
-    type(rbnode_t), pointer :: successor
+    type(rbnode_t), pointer :: succ
 
     type(rbnode_t), pointer :: child
     integer :: i
 
     if (.not. associated(node)) &
-        error stop 'nextnode: input is a null node'
+        error stop 'successor: input is a null node'
 
     ! If node has a right sub-tree, the next node is the leftmost node in this
     ! sub-tree
     if (associated(node%right)) then
-      successor => rbnode_leftmost(node%right)
+      succ => rbnode_leftmost(node%right)
       return
     end if
 
@@ -477,10 +444,10 @@ allocation_counter=allocation_counter-1
     ! means that the node is the last node
     child => node
     do i=1,MAX_SAFE_DEPTH
-      successor => child%parent
+      succ => child%parent
 
       ! no more parents, return null
-      if (.not. associated(successor)) exit
+      if (.not. associated(succ)) exit
 
       select case(rbnode_whichchild(child))
       case(LEFT_CHILD)
@@ -491,19 +458,19 @@ allocation_counter=allocation_counter-1
         ! grand-parent could be...
         child => child%parent
       case default
-        error stop 'nextnode: node has no parent and this is not expected'
+        error stop 'successor: node has no parent and this is not expected'
       end select
     end do
 
     if (i==MAX_SAFE_DEPTH+1) &
-      error stop 'nextnode: MAX_SAFE_DEPTH reached, increase it if this is not error'
-  end function rbnode_nextnode
+      error stop 'successor: MAX_SAFE_DEPTH reached, increase it if this is not error'
+  end function rbnode_successor
 
 
-  function rbnode_prevnode(node) result(predecessor)
+  function rbnode_predecessor(node) result(pred)
     !! Return prev node, or null pointer if node is the first node
     type(rbnode_t), intent(in), pointer :: node
-    type(rbnode_t), pointer :: predecessor
+    type(rbnode_t), pointer :: pred
 
     type(rbnode_t), pointer :: child
     integer :: i
@@ -514,7 +481,7 @@ allocation_counter=allocation_counter-1
     ! If node has a left sub-tree, the next node is the rightmost node in this
     ! sub-tree
     if (associated(node%left)) then
-      predecessor => rbnode_rightmost(node%left)
+      pred => rbnode_rightmost(node%left)
       return
     end if
 
@@ -523,10 +490,10 @@ allocation_counter=allocation_counter-1
     ! means that the node is the first node
     child => node
     do i=1,MAX_SAFE_DEPTH
-      predecessor => child%parent
+      pred => child%parent
 
       ! no more parents, return null
-      if (.not. associated(predecessor)) exit
+      if (.not. associated(pred)) exit
 
       select case(rbnode_whichchild(child))
       case(RIGHT_CHILD)
@@ -542,11 +509,12 @@ allocation_counter=allocation_counter-1
     end do
 
     if (i==MAX_SAFE_DEPTH+1) &
-      error stop 'prevnode: MAX_SAFE_DEPTH reached, increase it if this is not error'
-  end function rbnode_prevnode
+      error stop 'predecessor: MAX_SAFE_DEPTH reached, increase it if this is not error'
+  end function rbnode_predecessor
 
 
   function rbnode_find(start, val, cfun) result(found)
+    !! Find a node with the specified value
     type(rbnode_t), intent(in), pointer :: start
     integer(DATA_KIND), intent(in) :: val(:)
     procedure(compare_fun) :: cfun
@@ -1041,7 +1009,6 @@ allocation_counter=allocation_counter-1
   ! =============================
   ! Set operations (experimental)
   ! =============================
-!TODO: after testing, remove one of versions of the procedures
 
   recursive subroutine rbnode_freetree(T)
     type(rbnode_t), pointer, intent(inout) :: T
@@ -1051,181 +1018,68 @@ allocation_counter=allocation_counter-1
     if (.not. associated(T)) return
     if (associated(T%parent)) error stop 'freetree: node must be root'
 
-    call disconnect(L, m, R, T)
+    call unlink_root(L, m, R, T)
     if (associated(m)) call rbnode_free(m)
     call rbnode_freetree(L)
     call rbnode_freetree(R)
   end subroutine rbnode_freetree
 
 
-  function connect(left, node, right) result(root)
-    !! connect left and right subtrees as the children of "node"
-    type(rbnode_t), pointer, intent(in) :: left, node, right
-    type(rbnode_t), pointer :: root
+  function link_node(L, m, R) result(T)
+    !! connect left and right subtrees as the children of "m"
+    type(rbnode_t), pointer, intent(in) :: L, m, R
+    type(rbnode_t), pointer :: T
 
-    if (.not. associated(node)) error stop 'connect: node is nil'
+    if (.not. associated(m)) error stop 'link_node: node is nil'
 
     ! assert both sub-trees are roots
-    if (associated(left)) then
-      if (associated(left%parent)) error stop 'connect: left subtree is not root'
+    if (associated(L)) then
+      if (associated(L%parent)) error stop 'link_node: left subtree is not root'
     endif
-    if (associated(right)) then
-      if (associated(right%parent)) error stop 'connect: right subtree is not root'
+    if (associated(R)) then
+      if (associated(R%parent)) error stop 'link_node: right subtree is not root'
     end if
 
     ! assert node is isolated
-    if (associated(node%parent) .or. associated(node%left) .or. associated(node%right)) &
-      error stop 'connect: node is not isolated'
+    if (associated(m%parent) .or. associated(m%left) .or. associated(m%right)) &
+      error stop 'link_node: node is not isolated'
 
     ! make the connections
-    root => node
-    root%left => left
-    root%right => right
-    if (associated(root%left)) root%left%parent => root
-    if (associated(root%right)) root%right%parent => root
-  end function connect
+    T => m
+    T%left => L
+    T%right => R
+    if (associated(T%left)) T%left%parent => T
+    if (associated(T%right)) T%right%parent => T
+  end function link_node
 
 
-  subroutine disconnect(left, node, right, root)
-    !! Reverse operation to "connect": disconnect left and right subtrees from
-    !! the root, return pointers to both subtrees and the old root
-    type(rbnode_t), pointer, intent(out) :: left, node, right
-    type(rbnode_t), pointer, intent(in) :: root
+  subroutine unlink_root(L, m, R, T)
+    !! Reverse operation to "link_node": disconnect left and right subtrees from
+    !! the root, return pointers to both subtrees and to the old root node
+    type(rbnode_t), pointer, intent(out) :: L, m, R
+    type(rbnode_t), pointer, intent(in) :: T
 
     ! assert root exists and that it is root
-    if (.not. associated(root)) error stop 'disconnect: root is nil'
-    if (associated(root%parent)) error stop 'disconnect: root is not root'
+    if (.not. associated(T)) error stop 'unlink_root: root is nil'
+    if (associated(T%parent)) error stop 'unlink_root: root is not root'
 
-    left => root%left
-    node => root
-    right => root%right
+    L => T%left
+    m => T
+    R => T%right
 
-    if (associated(left)) then
-      if (.not. associated(left%parent, node)) &
-          error stop 'disconnect: left child is not a child'
-      left%parent => null()
-      node%left => null()
+    if (associated(L)) then
+      if (.not. associated(L%parent, m)) &
+          error stop 'unlink_root: left child is not a child'
+      L%parent => null()
+      m%left => null()
     end if
-    if (associated(right)) then 
-      if (.not. associated(right%parent, node)) &
-          error stop 'disconnect: right child is not a child'
-      right%parent => null()
-      node%right => null()
+    if (associated(R)) then 
+      if (.not. associated(R%parent, m)) &
+          error stop 'unlink_root: right child is not a child'
+      R%parent => null()
+      m%right => null()
     end if
-  end subroutine disconnect
-
-
-!TODO TO BE REMOVED
-  recursive function re_root(left,root,right) result(newroot)
-    !* Same job as "rbnode_newroot" but here we do not allocate any new memory.
-    !  The existing memory of "root" is reused instead.
-    !
-    type(rbnode_t), intent(in), pointer :: left, root, right
-    type(rbnode_t), pointer :: newroot
-
-    newroot => root
-    newroot%parent => null()
-    newroot%left => left
-    if (associated(newroot%left)) newroot%left%parent => newroot
-    newroot%right => right
-    if (associated(newroot%right)) newroot%right%parent => newroot
-  end function re_root
-
-
-!TODO TO BE REMOVED
-  recursive function join_right(tl, key, tr) result(newroot)
-    type(rbnode_t), intent(in), pointer :: tl, tr
-    integer(DATA_KIND), intent(in) :: key(:)
-    type(rbnode_t), pointer :: newroot
-
-    type(rbbasetree_t) :: t
-    logical(int8) :: tl_isblack
-
-    tl_isblack = rbnode_isblack(tl)
-
-    if (tl_isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
-      newroot => rbnode_t(tl, key, RED_COLOUR, tr)
-      return
-    end if
-
-    t%root => re_root(tl%left, tl, join_right(tl%right, key, tr))
-
-    if (tl_isblack .and. &
-       ((rbnode_isblack(t%root%right) .eqv. RED_COLOUR) .and. &
-        (rbnode_isblack(t%root%right%right) .eqv. RED_COLOUR))) then
-      t%root%right%right%isblack = BLACK_COLOUR
-      newroot => rotate_left(t%root, t)
-    else
-      newroot => t%root
-    end if
-  end function join_right
-
-
-!TODO TO BE REMOVED
-  recursive function join_left(tl, key, tr) result(newroot)
-    type(rbnode_t), intent(in), pointer :: tl, tr
-    integer(DATA_KIND), intent(in) :: key(:)
-    type(rbnode_t), pointer :: newroot
-
-    type(rbbasetree_t) :: t
-    logical(int8) :: tr_isblack
-
-    tr_isblack = rbnode_isblack(tr)
-
-    if (tr_isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
-      newroot => rbnode_t(tl, key, RED_COLOUR, tr)
-      return
-    end if
-
-    t%root => re_root(join_left(tl, key, tr%left), tr, tr%right)
-
-    if (tr_isblack .and. &
-       ((rbnode_isblack(t%root%left) .eqv. RED_COLOUR) .and. &
-        (rbnode_isblack(t%root%left%left) .eqv. RED_COLOUR))) then
-      t%root%left%left%isblack = BLACK_COLOUR
-      newroot => rotate_right(t%root, t)
-    else
-      newroot => t%root
-    end if
-  end function join_left
-
-
-!TODO TO BE REMOVED
-  function join(tl, key, tr) result(newroot)
-    !* Join two sub-trees and return the pointer to a root of new tree. New
-    !  node with "key" data is allocated during the process.
-    !
-    !  Note: all nodes in the left subtree must have key less than "key", and
-    !  all nodes in the right subtree must have key greater than "key" !
-    !
-    type(rbnode_t), intent(in), pointer :: tl, tr
-    integer(DATA_KIND), intent(in) :: key(:)
-    type(rbnode_t), pointer :: newroot
-
-    if (rbnode_blackheight(tl) > rbnode_blackheight(tr)) then
-      newroot => join_right(tl, key, tr)
-      if ((rbnode_isblack(newroot) .eqv. RED_COLOUR) .and. &
-          (rbnode_isblack(newroot%right) .eqv. RED_COLOUR )) &
-          newroot%isblack = BLACK_COLOUR
-      return
-    end if
-
-    if (rbnode_blackheight(tl) < rbnode_blackheight(tr)) then
-      newroot => join_left(tl, key, tr)
-      if ((rbnode_isblack(newroot) .eqv. RED_COLOUR) .and. &
-          (rbnode_isblack(newroot%left) .eqv. RED_COLOUR )) &
-          newroot%isblack = BLACK_COLOUR
-      return
-    end if
-
-    ! both trees have the same black height
-    if ((rbnode_isblack(tl) .eqv. BLACK_COLOUR) .and. &
-        (rbnode_isblack(tr) .eqv. BLACK_COLOUR)) then
-      newroot => rbnode_t(tl,key,RED_COLOUR,tr)
-    else
-      newroot => rbnode_t(tl,key,BLACK_COLOUR,tr)
-    end if
-  end function join
+  end subroutine unlink_root
 
 
   function join2(tl, k, tr) result(tjoin)
@@ -1268,10 +1122,10 @@ allocation_counter=allocation_counter-1
     ! both trees have the same black height
     if ((rbnode_isblack(tl) .eqv. BLACK_COLOUR) .and. &
         (rbnode_isblack(tr) .eqv. BLACK_COLOUR)) then
-      tjoin => connect(tl, k, tr)
+      tjoin => link_node(tl, k, tr)
       tjoin%isblack = RED_COLOUR
     else
-      tjoin => connect(tl, k, tr)
+      tjoin => link_node(tl, k, tr)
       tjoin%isblack = BLACK_COLOUR
     end if
   end function join2
@@ -1282,7 +1136,7 @@ allocation_counter=allocation_counter-1
     type(rbnode_t), pointer :: tjoin
 
     type(rbnode_t), pointer :: tl_left, tl_right, m
-    type(rbbasetree_t) :: t
+    type(rbbasetree_t) :: tree
     logical(int8) :: tl_isblack
 
     ! Assert nodes are roots
@@ -1296,21 +1150,21 @@ allocation_counter=allocation_counter-1
     tl_isblack = rbnode_isblack(tl)
 
     if (tl_isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
-      tjoin => connect(tl, k, tr)
+      tjoin => link_node(tl, k, tr)
       tjoin%isblack = RED_COLOUR
       return
     end if
 
-    call disconnect(tl_left, m, tl_right, tl)
-    t%root => connect(tl_left, m, join_right2(tl_right, k, tr))
+    call unlink_root(tl_left, m, tl_right, tl)
+    tree%root => link_node(tl_left, m, join_right2(tl_right, k, tr))
 
     if (tl_isblack .and. &
-       ((rbnode_isblack(t%root%right) .eqv. RED_COLOUR) .and. &
-        (rbnode_isblack(t%root%right%right) .eqv. RED_COLOUR))) then
-      t%root%right%right%isblack = BLACK_COLOUR
-      tjoin => rotate_left(t%root, t)
+       ((rbnode_isblack(tree%root%right) .eqv. RED_COLOUR) .and. &
+        (rbnode_isblack(tree%root%right%right) .eqv. RED_COLOUR))) then
+      tree%root%right%right%isblack = BLACK_COLOUR
+      tjoin => rotate_left(tree%root, tree)
     else
-      tjoin => t%root
+      tjoin => tree%root
     end if
   end function join_right2
 
@@ -1320,7 +1174,7 @@ allocation_counter=allocation_counter-1
     type(rbnode_t), pointer :: tjoin
 
     type(rbnode_t), pointer :: tr_left, tr_right, m
-    type(rbbasetree_t) :: t
+    type(rbbasetree_t) :: tree
     logical(int8) :: tr_isblack
 
     ! Assert nodes are roots
@@ -1334,26 +1188,26 @@ allocation_counter=allocation_counter-1
     tr_isblack = rbnode_isblack(tr)
 
     if (tr_isblack .and. rbnode_blackheight(tl)==rbnode_blackheight(tr)) then
-      tjoin => connect(tl, k, tr)
+      tjoin => link_node(tl, k, tr)
       tjoin%isblack = RED_COLOUR
       return
     end if
 
-    call disconnect(tr_left, m, tr_right, tr)
-    t%root => connect(join_left2(tl, k, tr_left), m, tr_right) 
+    call unlink_root(tr_left, m, tr_right, tr)
+    tree%root => link_node(join_left2(tl, k, tr_left), m, tr_right)
 
     if (tr_isblack .and. &
-       ((rbnode_isblack(t%root%left) .eqv. RED_COLOUR) .and. &
-        (rbnode_isblack(t%root%left%left) .eqv. RED_COLOUR))) then
-      t%root%left%left%isblack = BLACK_COLOUR
-      tjoin => rotate_right(t%root, t)
+       ((rbnode_isblack(tree%root%left) .eqv. RED_COLOUR) .and. &
+        (rbnode_isblack(tree%root%left%left) .eqv. RED_COLOUR))) then
+      tree%root%left%left%isblack = BLACK_COLOUR
+      tjoin => rotate_right(tree%root, tree)
     else
-      tjoin => t%root
+      tjoin => tree%root
     end if
   end function join_left2
 
 
-  recursive subroutine split2(l, k, r, t, key, cfun)
+  recursive subroutine split2(L, k, R, T, key, cfun)
     !* Split tree. Nodes with a value less than "key" go to the left subtree,
     !  and nodes with a value larger than "key" go to the right subtree.
     !  Pointers to the roots of both subtrees are returned.
@@ -1362,35 +1216,35 @@ allocation_counter=allocation_counter-1
     !  excluded from any of the sub-trees and returned as a "k" pointer.
     !  If no such node exists, a null pointer will be returned.
     !
-    type(rbnode_t), pointer, intent(out) :: l, r, k
+    type(rbnode_t), pointer, intent(out) :: L, R, k
       !! roots of left and right sub-trees, key node if it was present in "t"
-    type(rbnode_t), pointer, intent(in) :: t
+    type(rbnode_t), pointer, intent(in) :: T
     integer(DATA_KIND), intent(in) :: key(:)
     procedure(compare_fun) :: cfun
 
     type(rbnode_t), pointer :: l1, r1, m
 
-    l => null(); k => null(); r => null()
-    if (.not. associated(t)) return
+    L => null(); k => null(); R => null()
+    if (.not. associated(T)) return
 
     ! assert T is already a root of a tree
-    if (associated(t%parent)) error stop 'split - working node must be root'
+    if (associated(T%parent)) error stop 'split - working node must be root'
 
-    call disconnect(l, m, r, t)
+    call unlink_root(L, m, R, T)
 
     select case(cfun(key, rbnode_read(m)))
     case(0) ! key == old_root%key
       k => m
 
     case(-1) ! key < old_root%key
-      call split2(l1, k, r1, l, key, cfun)
-      l => l1
-      r => join2(r1, m, r)
+      call split2(l1, k, r1, L, key, cfun)
+      L => l1
+      R => join2(r1, m, R)
 
     case(+1) ! key > old_root%key
-      call split2(l1, k, r1, r, key, cfun)
-      r => r1
-      l => join2(l, m, l1)
+      call split2(l1, k, r1, R, key, cfun)
+      R => r1
+      L => join2(L, m, l1)
 
     case default
       error stop 'split: user function returned invalid value'
@@ -1398,85 +1252,15 @@ allocation_counter=allocation_counter-1
   end subroutine split2
 
 
-!TODO TO BE REMOVED
-  recursive subroutine split(l_root, key_node, r_root, old_root, key, cfun)
-    !* Split tree. Nodes with a value less than "key" go to the left subtree,
-    !  and nodes with a value larger than "key" go to the right subtree.
-    !
-    !  If tree contains a node with the same value as "key", this node will not
-    !  be included in any of the sub-trees. This node can be accessed through the
-    !  returned pointer "key_node" and it can be freed or inserted to any of the
-    !  subtrees as needed.
-    !
-    !  Tree rooted by "old_root" no longer exists after this operation !
-    !
-    type(rbnode_t), pointer, intent(out) :: l_root, r_root
-    type(rbnode_t), intent(out), pointer :: key_node
-    type(rbnode_t), pointer, intent(in) :: old_root
-    integer(DATA_KIND), intent(in) :: key(:)
-    procedure(compare_fun) :: cfun
-
-    type(rbnode_t), pointer :: ltmp, rtmp, to_delete
-
-    if (.not. associated(old_root)) then
-      l_root => null()
-      key_node => null()
-      r_root => null()
-      return
-    end if
-
-    select case(cfun(key, rbnode_read(old_root)))
-    case(0) ! key == old_root%key
-      l_root => old_root%left
-      if (associated(l_root)) l_root%parent=>null()
-      r_root => old_root%right
-      if (associated(r_root)) r_root%parent=>null()
-
-      ! the key-node will no longer be part of any sub-tree
-      key_node => old_root
-      key_node%left => null()
-      key_node%right => null()
-      key_node%parent => null()
-
-    case(-1) ! key < old_root%key
-      call split(ltmp, key_node, rtmp, old_root%left, key, cfun)
-      to_delete => old_root
-      l_root => ltmp
-      r_root => join(rtmp, rbnode_read(old_root), old_root%right)
-
-      ! While "join" returns a correct root node, the parent pointer of the root
-      ! to the other tree must be nullified here. 
-      if (associated(l_root)) l_root%parent=>null()
-
-      ! As a new node has been allocated during "join" process, the actual
-      ! root became superfluous and must be freed. 
-      call rbnode_free(to_delete)
-
-    case(+1) ! key > old_root%key
-      call split(ltmp, key_node, rtmp, old_root%right, key, cfun)
-      to_delete => old_root
-      l_root => join(old_root%left,rbnode_read(old_root),ltmp)
-      r_root => rtmp
-
-      if (associated(r_root)) r_root%parent=>null()
-      call rbnode_free(to_delete)
-
-      !Note: there might be an error on wikipedia...
-      !r_root => old_root%right
-
-    case default
-      error stop 'split: user function returned invalid value'
-    end select
-  end subroutine split
-
-
   recursive subroutine splitlast(Ts, m, T)
+    !! Split the rightmost node from the tree and return pointers to the node
+    !! and the rest of the tree.
     type(rbnode_t), pointer, intent(out) :: Ts, m
     type(rbnode_t), pointer, intent(in) :: T
 
     type(rbnode_t), pointer :: Ts1, m1, L, R
 
-    call disconnect(L, m, R, T)
+    call unlink_root(L, m, R, T)
     if (.not. associated(R)) then
       Ts => L
     else
@@ -1488,6 +1272,7 @@ allocation_counter=allocation_counter-1
 
 
   function join22(L, R) result(T)
+    !! Same as join, but without the central node
     type(rbnode_t), pointer, intent(in) :: L, R
     type(rbnode_t), pointer :: T
 
@@ -1500,38 +1285,6 @@ allocation_counter=allocation_counter-1
       T => join2(Ls, m, R)
     end if
   end function join22
-
-
-!TO BE REMOVED
-  recursive function union(t1, t2, cfun) result(t12)
-    type(rbnode_t), pointer, intent(inout) :: t1, t2
-    procedure(compare_fun) :: cfun
-    type(rbnode_t), pointer :: t12
-
-    type(rbnode_t), pointer :: l2, r2, key2, l12, r12
-
-    if (.not. associated(t1)) then
-      t12 => t2
-      return
-    else if (.not. associated(t2)) then
-      t12 => t1
-      return
-    end if
-
-    call split(l2, key2, r2, t2, rbnode_read(t1), cfun)
-
-    ! these two branches can run independently (paralelization?)
-    l12 => union(t1%left, l2, cfun)
-    r12 => union(t1%right, r2, cfun)
-
-    ! as soon as both branches are complete
-    t12 => join(l12, rbnode_read(t1), r12)
-
-    ! as root of "t1" is re-created by join, it must be removed
-    ! if T2 contained the same key, it must be removed as well
-    call rbnode_free(t1)
-    if (associated(key2)) call rbnode_free(key2)
-  end function union
 
 
   recursive function union2(T1, T2, cfun) result(t12)
@@ -1549,7 +1302,7 @@ allocation_counter=allocation_counter-1
       return
     end if
 
-    call disconnect(L1, m1, R1, T1)
+    call unlink_root(L1, m1, R1, T1)
     call split2(L2, m2, R2, T2, rbnode_read(m1), cfun)
 
     ! these two branches can run independently (paralelization?)
@@ -1575,7 +1328,7 @@ allocation_counter=allocation_counter-1
       return
     end if
 
-    call disconnect(L1, m1, R1, T1)
+    call unlink_root(L1, m1, R1, T1)
     call split2(L2, m2, R2, T2, rbnode_read(m1), cfun)
 
     ! these two branches can run independently (paralelization?)
@@ -1608,7 +1361,7 @@ allocation_counter=allocation_counter-1
       return
     end if
 
-    call disconnect(L1, m1, R1, T1)
+    call unlink_root(L1, m1, R1, T1)
     call split2(L2, m2, R2, T2, rbnode_read(m1), cfun)
 
     ! these two branches can run independently (paralelization?)
@@ -1634,6 +1387,7 @@ allocation_counter=allocation_counter-1
     n = rbnode_size(this%root)
   end function rbbasetree_size
 
+
   recursive function rbnode_size(node) result(n)
     type(rbnode_t), pointer, intent(in) :: node
     integer :: n
@@ -1654,6 +1408,7 @@ allocation_counter=allocation_counter-1
     if (associated(this%root)) isvalid = isvalid .and. &
         .not. associated(this%root%parent)
   end function rbbasetree_isvalid
+
 
   recursive subroutine rbnode_validate(root, cfun, isvalid, nblacks)
     type(rbnode_t), intent(in), pointer :: root
@@ -1704,6 +1459,7 @@ allocation_counter=allocation_counter-1
     integer :: bh
     bh = rbnode_blackheight(this%root)
   end function rbbasetree_blackheight
+
 
   function rbnode_blackheight(node) result(bh)
     !* The black height of a red–black tree is the number of black nodes in any
