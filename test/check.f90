@@ -8,9 +8,28 @@ program test_dll
     end subroutine test2
   end interface
 
-  !call tree_test_basic()
-  !call tree_test_joinsplit() ! NICED
-  call tree_test_union()  ! NICED
+  logical :: passed
+  real :: time(2)
+
+  call start_stopwatch('running insert test', time)
+  passed = run_insert_test(40000)
+  call end_stopwatch(time)
+  print '("Passed ? ",L2)', passed
+
+  call start_stopwatch('running delete test', time)
+  passed = run_delete_test(40000, inloop_validation=.false.)
+  call end_stopwatch(time)
+  print '("Passed ? ",L2)', passed
+
+  print *
+  call tree_test_joinsplit()
+
+  print *
+  call tree_test_union(copy_before_operation=.false.)
+  print *
+  call tree_test_union(copy_before_operation=.true.)
+
+  !print '("============= PLAYGROUND ====================")'
   !call tree_test_playground
   stop
 

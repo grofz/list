@@ -5,47 +5,40 @@ module tree_test_mod
   use mergesort_module
   implicit none
 
+  integer, parameter :: FLAG_DUPLICATE=1, FLAG_OK=0, FLAG_DUPLICATE_FREED=2
+  integer, parameter :: FLAG_NOTFOUND=1, FLAG_JUSTREMOVED=-1
+
 contains
 
-  subroutine tree_test_union()
-    !integer, parameter :: NMAX=30000000, N1=20000000, N2=08000000
-    integer, parameter :: NMAX=100, N1=20, N2=35
+  subroutine tree_test_union(copy_before_operation)
+    !integer, parameter :: NMAX=15000000, N1=10000000, N2=4000000
+    !integer, parameter :: NMAX=100, N1=20, N2=35
+    integer, parameter :: NMAX=2000000, N1=800000, N2=350000
+    logical, intent(in) :: copy_before_operation
 
     integer, allocatable :: x1(:), x2(:), x12(:)
     type(rbbasetree_t) :: t1, t2, t12
-    type(rbnode_t), pointer :: found
     integer :: i, j, last
     logical :: passed 
     real :: time(2)
-
-    800 format(a,": nodes = ",i0,"  black_h = ",i0,"  valid? ",l2)
 
     print '("------------------")'
     print '("Running Union test       total size ",i0,"k")', (N1+N2)/1000
     print '("------------------")'
 
     ! Prepare input trees
+    passed = .true.
     x1 = get_array(NMAX)
     x2 = get_array(NMAX)
     x1 = shuffle_array(x1)
     x2 = shuffle_array(x2)
-    
     call start_stopwatch('inserting nodes',time)
-    do i=1, max(N1, N2) ! Insert nodes
-      if (i<=N1) call rbnode_insert(t1, rbnode_t(transfer(x1(i),mold)), tree_test_basic_comp)
-      if (i<=N2) call rbnode_insert(t2, rbnode_t(transfer(x2(i),mold)), tree_test_basic_comp)
-    end do
+    call build_tree_via_insert(t1, x1(1:N1), passed, to_validate=.true.)
+    call build_tree_via_insert(t2, x2(1:N2), passed, to_validate=.true.)
     call end_stopwatch(time)
 
-    print 800, 'Tree 1', t1%size(), t1%blackheight(), t1%isvalid(tree_test_basic_comp)
-    print 800, 'Tree 2', t2%size(), t2%blackheight(), t2%isvalid(tree_test_basic_comp)
-    passed = t1%isvalid(tree_test_basic_comp) .and. t2%isvalid(tree_test_basic_comp)
-    print '("Allocated nodes counter ",i0)', allocation_counter
-
-    call t1%graphviz('tree_1', get_node_label)
-    call t2%graphviz('tree_2', get_node_label)
-    call traverse(t1, '1')
-    call traverse(t2, '2')
+    !call display_tree_information(t1, 'T1', passed)
+    !call display_tree_information(t2, 'T2', passed)
 
     ! Make independent union via arrays
     call start_stopwatch('making verification arrays',time)
@@ -69,42 +62,48 @@ contains
         N1, N2, j, N1+N2-j
 
     ! Union of two red-black trees
-    call start_stopwatch('calling union',time)
-    t12%root => union2(t1%root, t2%root, tree_test_basic_comp)
-   !t12%root => union(t1%root, t2%root, tree_test_basic_comp)
+    if (copy_before_operation) then
+      call start_stopwatch('calling union with copy',time)
+      t12%root => union(rbnode_t(t1%root), rbnode_t(t2%root), compare_integers)
+    else
+      ! original trees will be destroyed during operation
+      call start_stopwatch('calling union',time)
+      t12%root => union(t1%root, t2%root, compare_integers)
+    end if
     call end_stopwatch(time)
 
-    print 800,'Tree 1+2', t12%size(), t12%blackheight(), t12%isvalid(tree_test_basic_comp)
-    print '("Allocated nodes counter ",i0)', allocation_counter
-    call t12%graphviz('tree_1+2', get_node_label)
-    call traverse(t12,'1+2')
-    passed = passed .and. t12%isvalid(tree_test_basic_comp)
+    call display_tree_information(t12, 'T1_union_T2', passed)
 
-    ! Now compare nodes in T12 with x12 by trying to remove them all
-    call start_stopwatch('deleting nodes',time)
-    do i=1,j ! Remove nodes
-      found => rbnode_find(t12%root, transfer(x12(i),mold), tree_test_basic_comp)
-      if (associated(found)) then
-        call rbnode_delete(t12, found)
-      else
-        passed = .false.
-        print *, 'missing item = ',x12(i)
-      end if
-    end do
+    ! Now compare nodes in T12 with x12
+    call start_stopwatch('traversing nodes in union tree',time)
+    passed = passed .and. verify_nodes_order(t12, x12(1:j))
     call end_stopwatch(time)
 
-    print 800, 'After deleting', t12%size(), t12%blackheight(), t12%isvalid(tree_test_basic_comp)
-    print '("Allocated nodes counter ",i0)', allocation_counter
+    call start_stopwatch('deleting nodes from union tree',time)
+    x12(1:j) = shuffle_array(x12(1:j))
+    passed = passed .and. verify_nodes_and_delete(t12, x12(1:j))
+    call end_stopwatch(time)
 
+    if (copy_before_operation) then
+      ! Verify source trees are still traversable
+      passed = passed .and. t1%isvalid(compare_integers) .and. t2%isvalid(compare_integers)
+      x1(1:N1) = shuffle_array(x1(1:N1))
+      x2(1:N2) = shuffle_array(x2(1:N2))
+      call start_stopwatch('deleting nodes from original trees',time)
+      passed = passed .and. verify_nodes_and_delete(t1, x1(1:N1))
+      passed = passed .and. verify_nodes_and_delete(t2, x2(1:N2))
+      call end_stopwatch(time)
+    end if
+
+    ! Assert no leaking memory
     passed = passed .and. .not. associated(t12%root) .and. allocation_counter==0
+
     if (passed) then
       print '("Union test: PASS")'
     else
       print '("Union test: FAIL")'
     end if
   end subroutine tree_test_union
-
-
 
 
   subroutine tree_test_joinsplit()
@@ -114,26 +113,19 @@ contains
     integer :: i, isplit
     logical :: passed, rejoined
     real :: time(2), xr
-    integer, parameter :: N=15000000 
-    
-    800 format(a,": nodes = ",i0,"  black_h = ",i0,"  valid? ",l2)
+    integer, parameter :: N=9000000
 
     print '("-----------------------")'
     print '("Running Join/Split test       size ",i0,"k")', (N)/1000
     print '("-----------------------")'
 
     ! Prepare the tree
+    passed = .true.
     x = get_array(2*N)
     x = shuffle_array(x)
     call start_stopwatch('inserting nodes',time)
-    do i=1, N
-      call rbnode_insert(t12, rbnode_t(transfer(x(i),mold)), tree_test_basic_comp)
-    end do
+    call build_tree_via_insert(t12, x(1:N), passed, to_validate=.true.)
     call end_stopwatch(time)
-
-    print 800, 'tree', t12%size(), t12%blackheight(), t12%isvalid(tree_test_basic_comp)
-    passed = t12%isvalid(tree_test_basic_comp)
-    print '("Allocated nodes counter ",i0)', allocation_counter
 
     call quicksort(x(1:N))
 
@@ -141,19 +133,12 @@ contains
     call random_number(xr)
     isplit = int((2*N*xr)+1)
     call start_stopwatch('spliting tree',time)
-    call split2(t1%root, k%root, t2%root, t12%root, transfer(isplit,mold), tree_test_basic_comp)
+    call split(t1%root, k%root, t2%root, t12%root, transfer(isplit,mold), compare_integers)
     call end_stopwatch(time)
 
-    print 800, 'splitted left', t1%size(), t1%blackheight(), t1%isvalid(tree_test_basic_comp)
-    print 800, 'splitted right', t2%size(), t2%blackheight(), t2%isvalid(tree_test_basic_comp)
-    passed = passed .and. t1%isvalid(tree_test_basic_comp) .and. &
-        t2%isvalid(tree_test_basic_comp) .and. k%isvalid(tree_test_basic_comp)
-    call t1%graphviz('tree_1', get_node_label)
-    call t2%graphviz('tree_2', get_node_label)
-    !call traverse(t1, 'L')
-    !call traverse(t2, 'R')
-    call traverse(k,  'K')
-    print '("Allocated nodes counter ",i0)', allocation_counter
+    call display_tree_information(t1, 'T_left', passed)
+    call display_tree_information(t2, 'T_right', passed)
+    call display_tree_information(k, 'K_node', passed)
 
     ! verify split did not loose any nodes
     call start_stopwatch('verifying splits',time)
@@ -164,19 +149,19 @@ contains
       if (x(i)<isplit) then
         if (associated(cursor1)) then
           passed = passed .and. transfer(rbnode_read(cursor1),1)==x(i)
-          cursor1 => cursor1%nextnode()
+          cursor1 => rbnode_successor(cursor1)
           cycle
         end if
       else if (x(i)>isplit) then
         if (associated(cursor2)) then
           passed = passed .and. transfer(rbnode_read(cursor2),1)==x(i)
-          cursor2 => cursor2%nextnode()
+          cursor2 => rbnode_successor(cursor2)
           cycle
         end if
       else ! x(i)==isplit
         if (associated(cursork)) then
           passed = passed .and. transfer(rbnode_read(cursork),1)==x(i)
-          cursork => cursork%nextnode()
+          cursork => rbnode_successor(cursork)
           cycle
         end if
       end if
@@ -189,13 +174,10 @@ contains
     ! JOIN trees again (if split was not in tree, we skip this part)
     if (k%size()>0) then
       call start_stopwatch('re-joining trees',time)
-      t12%root => join2(t1%root, k%root, t2%root)
+      t12%root => join(t1%root, k%root, t2%root)
       call end_stopwatch(time)
 
-      print 800, 're-joined', t12%size(), t12%blackheight(), t12%isvalid(tree_test_basic_comp)
-      passed = passed .and. t12%isvalid(tree_test_basic_comp)
-      call t1%graphviz('tree_12', get_node_label)
-      call traverse(t12, 'L+R')
+      call display_tree_information(t12, 're-joined', passed)
 
       ! check that all nodes are present in the joined tree
       call start_stopwatch('verifying re-join',time)
@@ -203,7 +185,7 @@ contains
       do i=1, N
         if (associated(cursor1)) then
           passed = passed .and. transfer(rbnode_read(cursor1),1)==x(i)
-          cursor1 => cursor1%nextnode()
+          cursor1 => rbnode_successor(cursor1)
           cycle
         end if
         passed = .false.
@@ -220,13 +202,14 @@ contains
     ! Delete all trees
     call start_stopwatch('deleting nodes', time)
     if (rejoined) then
-      call delete_whole_tree(t12)
+      call rbnode_freetree(t12%root)
     else
-      call delete_whole_tree(t1)
-      call delete_whole_tree(t2)
+      call rbnode_freetree(t1%root)
+      call rbnode_freetree(t2%root)
     end if
     call end_stopwatch(time)
-    print '("Allocated nodes counter ",i0)', allocation_counter
+
+    ! Memory leak check
     passed = passed .and. allocation_counter==0
 
     if (passed) then
@@ -234,117 +217,51 @@ contains
     else
       print '("Join/Split test: FAIL")'
     end if
-
-  contains
-    subroutine delete_whole_tree(tree)
-      type(rbbasetree_t), intent(inout) :: tree
-      type(rbnode_t), pointer :: cnow
-      do
-        cnow => tree%leftmost()
-        if (.not. associated(cnow)) exit
-        call rbnode_delete(tree, cnow)
-      end do
-    end subroutine
-
   end subroutine tree_test_joinsplit
-
-
 
   
   subroutine tree_test_basic()
-    integer, parameter, dimension(*) :: DATA=[10, 5, 7, 8, 9, 11, 12, 13]
-    integer, parameter :: NSIZE = 52
-   !integer, parameter :: NSIZE = 150000
-
-    type(rbnode_t), pointer :: current, output
-    type(rbbasetree_t) :: tree
-    integer :: ierr, i, nblacks
-    integer, allocatable :: y1(:), y2(:)
-    logical :: isvalid
-
-    y1 = get_array(NSIZE)
-    y2 = shuffle_array(y1)
-
-    do i=1, size(y2)
-      !call rbnode_insert(tree, rbnode_t(transfer(DATA(i),mold)), tree_test_basic_comp, ierr)
-      call rbnode_insert(tree, rbnode_t(transfer(y2(i),mold)), tree_test_basic_comp, ierr)
-      if (ierr/=0) print *, 'Insert ierr = ',ierr
-    end do
-    print '("Is tree valid after inserion?",L2)', &
-      tree%isvalid(tree_test_basic_comp)
-   !call rbbasetree_graphviz('our_tree', tree)
-
-    ! traversing
-    current=>rbnode_leftmost(tree%root)
-    do
-      if (.not. associated(current)) exit
-      write(*,'("[",i0,l2,": ",i0,"]",3x)',advance='no') &
-          transfer(rbnode_read(current),i), current%is_node_black(), rbnode_blackheight(current)
-      current => current%nextnode()
-    end do
-    write(*,*)
-
-    ! Deletion
-    do i=1, size(y2)
-      call rbnode_delete(tree, rbnode_find(tree%root, &
-        transfer(y2(i),mold), tree_test_basic_comp) )
-      if (mod(i,10000)/=0) cycle
-      isvalid = tree%isvalid(tree_test_basic_comp)
-      !print *, 'removed ',y2(i), isvalid
-      if (.not. isvalid) stop 'tree is not valid'
-    end do
-
-    ! Root is
-    if (associated(tree%root)) then
-      print *, "Root is: ", transfer(rbnode_read(tree%root),i), tree%root%is_node_black()
-    else
-      print *, "Root is null:"
-    end if
-
-    ! Validation
-    call rbnode_validate(tree%root, tree_test_basic_comp, isvalid, nblacks)
-    print '("Is tree valid ?",L2, " black nodes count = ",i0)',isvalid, nblacks
+    !! TODO test import/export and copy
   end subroutine tree_test_basic
 
 
-
-
   subroutine tree_test_playground()
-    type(rbbasetree_t) :: ta, tb, tab, k, tcopy
+    type(rbbasetree_t) :: ta, tb, tab, k 
     integer, parameter, dimension(*) :: &
       x1 = [20, 30, 40, 50, 60, 70, 80], &
       x2 = [4, 30, 35, 40]
     integer, parameter :: KEY=31, KSPLIT=31
     integer :: i 
-    integer, allocatable :: starts(:)
-    integer(DATA_KIND), allocatable :: values(:)
+    logical :: passed
+   !integer, allocatable :: starts(:)
+   !integer(DATA_KIND), allocatable :: values(:)
     
-   !do i=1, max(size(x1), size(x2)) ! Insert nodes
-   !  if (i<=size(x1)) call rbnode_insert(ta, rbnode_t(transfer(x1(i),mold)), tree_test_basic_comp)
-   !  if (i<=size(x2)) call rbnode_insert(tb, rbnode_t(transfer(x2(i),mold)), tree_test_basic_comp)
-   !end do
-    !k%root => rbnode_t(transfer(KEY,mold))
+    passed = .true.
+    call build_tree_via_insert(ta, x1, passed, to_validate=.true.)
+    passed = passed .and. verify_nodes_order(ta, x1)
+    print *, 'test_order ', passed
+
+    stop
 
     ! BUILD FROM RAW DATA (if "x" are sorted)
     ta%root=>rbnode_t(int(x1,DATA_KIND), [(i,i=1,size(x1))])
     tb%root=>rbnode_t(int(x2,DATA_KIND), [(i,i=1,size(x2))])
-
 
     call ta%graphviz('tree_a',get_node_label)
     call tb%graphviz('tree_b',get_node_label)
     call traverse(ta,'ta')
     call traverse(tb,'tb')
     print '("Black height of ta/tb: ",l2,1x,i0," | ",l2,1x,i0)', &
-        ta%isvalid(tree_test_basic_comp), ta%blackheight(), tb%isvalid(tree_test_basic_comp), tb%blackheight()
+        ta%isvalid(compare_integers), ta%blackheight(), tb%isvalid(compare_integers), tb%blackheight()
     print '("Allocated nodes counter ",i0)', allocation_counter
 
     ! SET OPERATIONS
-    !tab%root => union2(ta%root, tb%root, tree_test_basic_comp)
-    tab%root => union2(rbnode_t(ta%root), rbnode_t(tb%root), tree_test_basic_comp)
-    !t%root => intersection2(tl%root, tr%root, tree_test_basic_comp)
+    !tab%root => union2(ta%root, tb%root, compare_integers)
+    tab%root => union(rbnode_t(ta%root), rbnode_t(tb%root), compare_integers)
+    !t%root => intersection2(tl%root, tr%root, compare_integers)
     call traverse(tab,'tab')
     call tab%graphviz('tree_ab',get_node_label)
-    print '("Black height of tab: ",l2,1x,i0)', tab%isvalid(tree_test_basic_comp), tab%blackheight()
+    print '("Black height of tab: ",l2,1x,i0)', tab%isvalid(compare_integers), tab%blackheight()
 
     ! Check originals are intact
    !call ta%graphviz('tree_a',get_node_label)
@@ -352,7 +269,7 @@ contains
     call traverse(ta,'ta')
     call traverse(tb,'tb')
     print '("Black height of ta/tb: ",l2,1x,i0," | ",l2,1x,i0)', &
-        ta%isvalid(tree_test_basic_comp), ta%blackheight(), tb%isvalid(tree_test_basic_comp), tb%blackheight()
+        ta%isvalid(compare_integers), ta%blackheight(), tb%isvalid(compare_integers), tb%blackheight()
     print '("Allocated nodes counter ",i0)', allocation_counter
 
     ! EXPORT
@@ -363,9 +280,7 @@ contains
 !   print '(*(i0,1x))', starts
 !   tcopy%root => rbnode_t(values, starts)
 !   call traverse(tcopy,'tcopy')
-!   print *, tcopy%isvalid(tree_test_basic_comp)
-
-
+!   print *, tcopy%isvalid(compare_integers)
 
     ! Delete all trees
     call rbnode_freetree(tab%root)
@@ -374,6 +289,169 @@ contains
     call rbnode_freetree(tb%root)
     print '("Allocated nodes counter ",i0)', allocation_counter
   end subroutine tree_test_playground
+
+
+  ! ==========================================
+  ! Test insert / remove / traverse operations
+  ! ==========================================
+
+  subroutine display_tree_information(tree, label, passing_pipe)
+    type(rbbasetree_t), intent(in) :: tree
+    character(len=*), intent(in) :: label
+    logical, intent(inout) :: passing_pipe
+
+    800 format(a,": nodes = ",i0,"  black_h = ",i0,"  valid? ",l2)
+
+    print 800, label, tree%size(), tree%blackheight(), tree%isvalid(compare_integers)
+    passing_pipe = passing_pipe .and. tree%isvalid(compare_integers)
+    call tree%graphviz(label, get_node_label)
+    call traverse(tree, label)
+  end subroutine display_tree_information
+
+
+  function run_delete_test(nsize, inloop_validation, seed) result(passed)
+    integer, intent(in) :: nsize
+    integer, intent(in), optional :: seed
+    logical, intent(in) :: inloop_validation
+    logical :: passed
+
+    type(rbbasetree_t) :: tree
+    type(rbnode_t), pointer :: node
+    integer, allocatable :: y(:)
+    integer :: ierr, i, nodes
+
+    y = get_array(nsize)
+    y = shuffle_array(y, seed)
+    nodes = allocation_counter
+    passed = .true.
+    call build_tree_via_insert(tree, y, passed, to_validate=.true.)
+
+    y = shuffle_array(y)
+    ! Step 1 - Find and delete nodes from the tree until it is empty
+    do i=1,nsize
+      if (.not. passed) exit
+      if (mod(i,2)==0) then
+        call rbnode_delete(tree, rbnode_find(tree%root, transfer(y(i),mold), compare_integers), ierr=ierr)
+      else
+        call rbnode_delete(tree, rbnode_find(tree%root, transfer(y(i),mold), compare_integers), deleted_output=node)
+        call rbnode_free(node)
+        ierr = FLAG_OK
+      end if
+      if (ierr /= FLAG_OK) passed = .false.
+      ! validate tree when it gets sufficiently small or "inloop_validation" is on
+      if (inloop_validation .or. nsize-i < 1000) &
+          passed = passed .and. tree%isvalid(compare_integers)
+
+      ! try to remove node that does not exists
+      call rbnode_delete(tree, rbnode_find(tree%root, transfer(y(i),mold), compare_integers), ierr=ierr)
+      if (ierr /= FLAG_NOTFOUND) passed = .false.
+    end do
+    if (nodes /= allocation_counter) passed = .false.
+  end function run_delete_test
+
+
+  function run_insert_test(nsize, seed) result(passed)
+    integer, intent(in) :: nsize
+    integer, intent(in), optional :: seed
+    logical :: passed
+
+    type(rbbasetree_t) :: tree
+    integer, allocatable :: y(:)
+    integer :: ierr, i, nodes
+
+    y = get_array(nsize)
+    y = shuffle_array(y, seed)
+
+    ! Step 1 - just insert nodes in an empty tree
+    passed = .true.
+    nodes = allocation_counter
+    call build_tree_via_insert(tree, y, passed, to_validate=.true.)
+    if (nodes+nsize /= allocation_counter) passed = .false.
+
+    ! Step 2 - try to insert duplicate nodes, assert the insertion fails
+    do i=1, size(y)
+      if (.not. passed) exit
+      call rbnode_insert(tree, rbnode_t(transfer(y(i),mold)), compare_integers, &
+          ierr=ierr)
+      if (ierr == FLAG_DUPLICATE_FREED) cycle
+      ! failing test
+      passed = .false.
+    end do
+    if (nodes+nsize /= allocation_counter) passed = .false.
+
+    call rbnode_freetree(tree%root)
+    if (nodes /= allocation_counter) passed = .false.
+  end function run_insert_test
+
+
+  subroutine build_tree_via_insert(tree, y, passing_pipe, to_validate)
+    type(rbbasetree_t), intent(inout) :: tree
+    integer, intent(in)    :: y(:)
+    logical, intent(inout) :: passing_pipe
+    logical, intent(in)    :: to_validate
+
+    integer :: i, ierr
+    type(rbnode_t), pointer :: node
+
+    do i=1,size(y)
+      call rbnode_insert(tree, rbnode_t(transfer(y(i),mold)), compare_integers, &
+          ierr=ierr, new_output=node)
+      if (ierr==FLAG_OK) cycle
+      ! insert error, probably duplicit elements
+      passing_pipe = .false.
+      if (ierr==FLAG_DUPLICATE) call rbnode_free(node)
+    end do
+
+    if (to_validate) passing_pipe = passing_pipe .and. tree%isvalid(compare_integers)
+  end subroutine build_tree_via_insert
+
+
+  function verify_nodes_order(tree, y) result(passed)
+    type(rbbasetree_t), intent(in) :: tree
+    integer, intent(in) :: y(:)
+    logical :: passed
+
+    type(rbnode_t), pointer :: cursor
+    integer :: i
+
+    passed = .true.
+    cursor => rbnode_leftmost(tree%root)
+    do i=1, size(y)
+      if (.not. associated(cursor)) exit
+      if (transfer(rbnode_read(cursor),1) /= y(i)) passed = .false.
+      cursor => rbnode_successor(cursor)
+    end do
+    if (i/=size(y)+1 .or. associated(cursor)) passed = .false.
+
+    ! traverse in oposite direction
+    cursor => rbnode_rightmost(tree%root)
+    do i=size(y), 1, -1
+      if (.not. associated(cursor)) exit
+      if (transfer(rbnode_read(cursor),1) /= y(i)) passed = .false.
+      cursor => rbnode_predecessor(cursor)
+    end do
+    if (i/=0 .or. associated(cursor)) passed = .false.
+  end function verify_nodes_order
+
+
+  function verify_nodes_and_delete(tree, y) result(passed)
+    type(rbbasetree_t), intent(inout) :: tree
+    integer, intent(in) :: y(:)
+    logical :: passed
+
+    type(rbnode_t), pointer :: found
+    integer :: i
+
+    passed = .true.
+    do i=1, size(y)
+      found => rbnode_find(tree%root, transfer(y(i),mold), compare_integers)
+      if (associated(found)) then
+        call rbnode_delete(tree, found)
+        cycle
+      end if
+      passed = .false.
+    end do
+  end function verify_nodes_and_delete
 
 
   ! =====================================
@@ -389,7 +467,7 @@ contains
   end function get_node_label
 
 
-  integer function tree_test_basic_comp(a,b) result(comp)
+  integer function compare_integers(a,b) result(comp)
     !! Plug-in function for rbnode_t nodes comparison
     integer(DATA_KIND), intent(in), dimension(:) :: a, b
     integer :: aval, bval
@@ -403,7 +481,7 @@ contains
     else
       comp = 0
     end if
-  end function tree_test_basic_comp
+  end function compare_integers
 
 
   ! ====================
@@ -419,12 +497,21 @@ contains
   end function get_array
 
 
-  function shuffle_array(yin) result(yout)
+  function shuffle_array(yin, seed) result(yout)
     integer, intent(in) :: yin(:)
+    integer, intent(in), optional :: seed
     integer :: yout(size(yin))
 
-    integer :: i, j, n, ytmp
+    integer :: i, j, n, ytmp, seed_size
+    integer, allocatable :: seed_arr(:)
     real :: xran
+
+    ! set seed to make shuffle deterministic
+    if (present(seed)) then
+      call random_seed(size=seed_size)
+      allocate(seed_arr(seed_size), source=seed)
+      call random_seed(put=seed_arr)
+    end if
 
     yout = yin
     n = size(yin)
@@ -464,8 +551,8 @@ contains
     do
       if (.not. associated(current)) exit
       write(*,'("[",i0,l2,": ",i0,"]",3x)',advance='no') &
-          transfer(rbnode_read(current),i), current%is_node_black(), rbnode_blackheight(current)
-      current => current%nextnode()
+          transfer(rbnode_read(current),i), current%isblack_f(), rbnode_blackheight(current)
+      current => rbnode_successor(current)
     end do
     write(*,*)
   end subroutine traverse
@@ -477,6 +564,7 @@ contains
     call cpu_time(time(1))
     write(*,'(a)',advance='no') task//'...  '
   end subroutine
+
 
   subroutine end_stopwatch(time)
     real, intent(inout) :: time(2)

@@ -1,35 +1,34 @@
-### Red-black tree
+## Linked-list
+- [ ] add user example
 
-- [x] join and split
-- [x] optimize join+split process (no reallocations)
-- [x] black height
-- [x] allow that root is red
-- [x] union  (with test)
-- [ ] insert and delete tests
+## Red-black tree
 
-- [ ] tide-up function names, consistent with list names
-- [ ] example of simple tree usage
+- [ ] add difference and intersection tests
+- [ ] add import / export / copy test
+- [ ] implement build from unsorted array (import)
+- [ ] implement filter operation
+- [ ] implement update node operation
 
-#####Set operations
+- [ ] tide-up function names, keep consistency with list names
+- [ ] add a simple example of using the library
+- [ ] example of destructive / nondestructive operations
 
-- [ ] test intersection/difference
-- [ ] operations are destructive, show an example how a copy
-      can be made easily
+##### Set operations
+
+- [ ] storing black height at nodes (efficiency of set-ops)
 - [ ] maybe overload operators + * - for union, intersection and differenve
 - [ ] encapsulation as tree/tree operations?
-- [ ] tidy-up code
-- [ ] join-based insert / delete ??
-- [x] import/export of data to/from an array
-- [ ] filter
-- [ ] build from unsorted array (import)
+- [ ] join-based insert / delete (just for fun)
 - [ ] import/export to file (directly or implement save/load of arrays in common_mod)
 
-A tree module with a linear allocator
+#### A tree module with a linear allocator
+- [ ] test the concept
 - [ ] basic implementation and speed comparisons
 
-## Naming methods suggestions
+## Other notes
 
-- unlink_root, link_node
+#### Naming methods suggestions
+
 - insert(value)
 - erase(value)
 - erase(iterator)
