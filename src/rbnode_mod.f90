@@ -23,9 +23,16 @@ module rbnode_mod
     procedure :: nextnode => nextnode_tbp
   end type rbnode_t
   interface rbnode_t
+    !* Signatures recognized by the constructor
+    !
+    !   * rank-1 array: to allocate a single node
+    !
+    !   * rank-1 array + meta-data: to build a tree from an array
+    !
+    !   * pointer to a node: to deep copy the sub-tree rooted by the node
     module procedure rbnode_new
-    !module procedure rbnode_import
-    !module procedure rbnode_copy
+    module procedure rbnode_importsorted
+    module procedure rbnode_copytree
   end interface
 
 
@@ -51,6 +58,7 @@ module rbnode_mod
   public rbnode_leftmost, rbnode_successor, rbnode_predecessor
   public rbnode_insert, rbnode_delete, rbnode_freetree
   public rbnode_validate, rbnode_blackheight
+  public rbnode_export
   public join2, join22, split2, union2, intersection2, difference2
 
   integer, public, save :: allocation_counter = 0
@@ -1025,6 +1033,22 @@ allocation_counter=allocation_counter-1
   end subroutine rbnode_freetree
 
 
+  recursive function rbnode_copytree(tsrc) result(T)
+    !! Allocate new tree - duplicate of subtree "tsrc"
+    type(rbnode_t), pointer, intent(in) :: tsrc
+    type(rbnode_t), pointer :: T
+
+    if (.not. associated(tsrc)) then
+      T => null()
+    else
+      T => link_node(rbnode_t(tsrc%left), &
+                     rbnode_t(rbnode_read(tsrc)), &
+                     rbnode_t(tsrc%right))
+      T%isblack = tsrc%isblack
+    end if
+  end function rbnode_copytree
+
+
   function link_node(L, m, R) result(T)
     !! connect left and right subtrees as the children of "m"
     type(rbnode_t), pointer, intent(in) :: L, m, R
@@ -1305,7 +1329,7 @@ allocation_counter=allocation_counter-1
     call unlink_root(L1, m1, R1, T1)
     call split2(L2, m2, R2, T2, rbnode_read(m1), cfun)
 
-    ! these two branches can run independently (paralelization?)
+    ! these two branches can run independently
     L12 => union2(L1, L2, cfun)
     R12 => union2(R1, R2, cfun)
 
@@ -1331,7 +1355,7 @@ allocation_counter=allocation_counter-1
     call unlink_root(L1, m1, R1, T1)
     call split2(L2, m2, R2, T2, rbnode_read(m1), cfun)
 
-    ! these two branches can run independently (paralelization?)
+    ! these two branches can run independently
     L12 => intersection2(L1, L2, cfun)
     R12 => intersection2(R1, R2, cfun)
 
@@ -1364,7 +1388,7 @@ allocation_counter=allocation_counter-1
     call unlink_root(L1, m1, R1, T1)
     call split2(L2, m2, R2, T2, rbnode_read(m1), cfun)
 
-    ! these two branches can run independently (paralelization?)
+    ! these two branches can run independently
     L12 => difference2(L1, L2, cfun)
     R12 => difference2(R1, R2, cfun)
 
@@ -1376,6 +1400,93 @@ allocation_counter=allocation_counter-1
       T12 => join2(L12, m1, R12)
     end if
   end function difference2
+
+
+  function rbnode_export(T, starts) result(values)
+    !! Store sub-tree `T` data into an array
+    type(rbnode_t), pointer, intent(in) :: T
+    integer, allocatable, intent(out), optional :: starts(:)
+      !! The pair [starts(i), starts(i+1)-1] is the index range specifying data
+      !! blocks in `values` belonging to node `i`.
+      !! (Data for the last block ends at the end of `values`.)
+    integer(DATA_KIND), allocatable :: values(:)
+
+    integer n, nval, i, j
+
+    n = rbnode_size(T)
+    if (present(starts)) allocate(starts(n))
+    nval = rbnode_countvalues(T)
+    allocate(values(nval))
+
+    i = 0 ! the last defined record in starts
+    j = 0 ! the last defined record in values
+    call visit_nodes_export(T, i, j, starts, values)
+
+    if (i/=n) error stop 'export: number of visited nodes mismatch'
+    if (j/=nval) error stop 'export: number of exported data values mismatch'
+  end function rbnode_export
+
+
+  recursive subroutine visit_nodes_export(node, i, j, starts, values)
+    type(rbnode_t), intent(in), pointer :: node
+    integer, intent(inout) :: i, j
+    integer(DATA_KIND), intent(inout) :: values(:)
+    integer, intent(inout), optional :: starts(:)
+
+    if (.not. associated(node)) return
+
+    call visit_nodes_export(node%left, i, j, starts, values)
+
+    associate(curdata=>rbnode_read(node))
+      i = i + 1
+      j = j + 1
+      values(j:j+size(curdata)-1) = curdata
+      if (present(starts)) starts(i) = j
+      j = j+size(curdata)-1
+    end associate
+
+    call visit_nodes_export(node%right, i, j, starts, values)
+  end subroutine visit_nodes_export
+
+
+  recursive function rbnode_importsorted(values, starts) result(T)
+    !! Build tree from an array. The order of nodes is determined by the order
+    !! of data in input arrays.
+    !!
+    !! The nodes must be sorted - no verification is done here!
+    !!
+    integer(DATA_KIND), intent(in) :: values(:)
+    integer, intent(in) :: starts(:)
+      !! The pair [starts(i), starts(i+1)-1] is the index range specifying data
+      !! blocks in `values` belonging to node `i`.
+      !! (Data for the last block ends at the end of `values`.)
+    type(rbnode_t), pointer :: T
+
+    type(rbnode_t), pointer :: L, R
+    integer :: n, i, jbeg, jend
+
+    n = size(starts)
+    if (n==0) then
+      if (size(values)/=0) &
+          error stop 'importsorted: values array of zero size expected here'
+      T => null()
+
+    else if (n==1) then
+      T => link_node(null(), rbnode_t(values), null())
+
+    else
+      i = n/2+1
+      jbeg = starts(i)-starts(1)+1
+      if (n>2) then
+        jend = starts(i+1)-starts(1)+1 - 1
+      else
+        jend = size(values)
+      end if
+      L => rbnode_importsorted(values(:jbeg-1), starts(:i-1))
+      R => rbnode_importsorted(values(jend+1:), starts(i+1:))
+      T => join2(L, rbnode_t(values(jbeg:jend)), R)
+    end if
+  end function rbnode_importsorted
 
 
   ! ================================
@@ -1395,6 +1506,16 @@ allocation_counter=allocation_counter-1
     if (.not. associated(node)) return
     n = 1 + rbnode_size(node%left) + rbnode_size(node%right)
   end function rbnode_size
+
+
+  recursive function rbnode_countvalues(node) result(nval)
+    type(rbnode_t), pointer, intent(in) :: node
+    integer :: nval
+    nval = 0
+    if (.not. associated(node)) return
+    if (allocated(node%dat)) nval = size(node%dat,1)
+    nval = nval + rbnode_countvalues(node%left) + rbnode_countvalues(node%right)
+  end function rbnode_countvalues
 
 
   function rbbasetree_isvalid(this, cfun) result(isvalid)

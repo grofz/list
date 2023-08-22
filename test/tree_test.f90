@@ -8,8 +8,8 @@ module tree_test_mod
 contains
 
   subroutine tree_test_union()
-    integer, parameter :: NMAX=30000000, N1=20000000, N2=08000000
-    !integer, parameter :: NMAX=100, N1=20, N2=35
+    !integer, parameter :: NMAX=30000000, N1=20000000, N2=08000000
+    integer, parameter :: NMAX=100, N1=20, N2=35
 
     integer, allocatable :: x1(:), x2(:), x12(:)
     type(rbbasetree_t) :: t1, t2, t12
@@ -310,64 +310,69 @@ contains
 
 
   subroutine tree_test_playground()
-   !integer, parameter, dimension(*) :: &
-   !   DAT1=[10, 1, 5, 13], & ! these gave memory leak union (but should be fixed)
-   !   DAT2=[1, 9, 10, 6, 13]
-    type(rbbasetree_t) :: tl, tr, tjoin, tsl, tsr, sk, t
-    type(rbnode_t), pointer :: k
+    type(rbbasetree_t) :: ta, tb, tab, k, tcopy
     integer, parameter, dimension(*) :: &
       x1 = [20, 30, 40, 50, 60, 70, 80], &
-      x2 = [30, 35, 40, 4]
+      x2 = [4, 30, 35, 40]
     integer, parameter :: KEY=31, KSPLIT=31
     integer :: i 
+    integer, allocatable :: starts(:)
+    integer(DATA_KIND), allocatable :: values(:)
     
-   do i=1, max(size(x1), size(x2)) ! Insert nodes
-     if (i<=size(x1)) call rbnode_insert(tl, rbnode_t(transfer(x1(i),mold)), tree_test_basic_comp)
-     if (i<=size(x2)) call rbnode_insert(tr, rbnode_t(transfer(x2(i),mold)), tree_test_basic_comp)
-   end do
-    k => rbnode_t(transfer(KEY,mold))
-    call tl%graphviz('tree_left',get_node_label)
-    call tr%graphviz('tree_right',get_node_label)
-    call traverse(tl,'tl')
-    call traverse(tr,'tr')
-    print '("Black height of tl/tr: ",l2,1x,i0," | ",l2,1x,i0)', &
-        tl%isvalid(tree_test_basic_comp), tl%blackheight(), tr%isvalid(tree_test_basic_comp), tr%blackheight()
+   !do i=1, max(size(x1), size(x2)) ! Insert nodes
+   !  if (i<=size(x1)) call rbnode_insert(ta, rbnode_t(transfer(x1(i),mold)), tree_test_basic_comp)
+   !  if (i<=size(x2)) call rbnode_insert(tb, rbnode_t(transfer(x2(i),mold)), tree_test_basic_comp)
+   !end do
+    !k%root => rbnode_t(transfer(KEY,mold))
+
+    ! BUILD FROM RAW DATA (if "x" are sorted)
+    ta%root=>rbnode_t(int(x1,DATA_KIND), [(i,i=1,size(x1))])
+    tb%root=>rbnode_t(int(x2,DATA_KIND), [(i,i=1,size(x2))])
+
+
+    call ta%graphviz('tree_a',get_node_label)
+    call tb%graphviz('tree_b',get_node_label)
+    call traverse(ta,'ta')
+    call traverse(tb,'tb')
+    print '("Black height of ta/tb: ",l2,1x,i0," | ",l2,1x,i0)', &
+        ta%isvalid(tree_test_basic_comp), ta%blackheight(), tb%isvalid(tree_test_basic_comp), tb%blackheight()
     print '("Allocated nodes counter ",i0)', allocation_counter
 
     ! SET OPERATIONS
-    t%root => difference2(tl%root, tr%root, tree_test_basic_comp)
+    !tab%root => union2(ta%root, tb%root, tree_test_basic_comp)
+    tab%root => union2(rbnode_t(ta%root), rbnode_t(tb%root), tree_test_basic_comp)
     !t%root => intersection2(tl%root, tr%root, tree_test_basic_comp)
-    call traverse(t,'t')
-    call t%graphviz('intersection',get_node_label)
+    call traverse(tab,'tab')
+    call tab%graphviz('tree_ab',get_node_label)
+    print '("Black height of tab: ",l2,1x,i0)', tab%isvalid(tree_test_basic_comp), tab%blackheight()
 
-    call rbnode_freetree(t%root)
-    call rbnode_freetree(k)
+    ! Check originals are intact
+   !call ta%graphviz('tree_a',get_node_label)
+   !call tb%graphviz('tree_b',get_node_label)
+    call traverse(ta,'ta')
+    call traverse(tb,'tb')
+    print '("Black height of ta/tb: ",l2,1x,i0," | ",l2,1x,i0)', &
+        ta%isvalid(tree_test_basic_comp), ta%blackheight(), tb%isvalid(tree_test_basic_comp), tb%blackheight()
     print '("Allocated nodes counter ",i0)', allocation_counter
 
-    stop
-    ! JOIN OPERATION
-   !tjoin%root => join2(tl%root, k, tr%root)
-    tjoin%root => join22(tl%root, tr%root)
+    ! EXPORT
+!   values = rbnode_export(tab%root, starts)
+!   print *, 'values ='
+!   print '(*(i0,1x))', values
+!   print *, 'starts ='
+!   print '(*(i0,1x))', starts
+!   tcopy%root => rbnode_t(values, starts)
+!   call traverse(tcopy,'tcopy')
+!   print *, tcopy%isvalid(tree_test_basic_comp)
 
-    print '("Black height of tjoin: ",l2,1x,i0)', &
-        tjoin%isvalid(tree_test_basic_comp), tjoin%blackheight()
-    call traverse(tjoin,'tjoin')
-    call tjoin%graphviz('tree_join',get_node_label)
+
+
+    ! Delete all trees
+    call rbnode_freetree(tab%root)
+    call rbnode_freetree(k%root)
+    call rbnode_freetree(ta%root)
+    call rbnode_freetree(tb%root)
     print '("Allocated nodes counter ",i0)', allocation_counter
-
-    ! SPLIT
-    print *
-    print *, 'SPLIT'
-    call split2(tsl%root, sk%root, tsr%root, tjoin%root, transfer(KSPLIT,mold), tree_test_basic_comp)
-    call tsl%graphviz('left_split',get_node_label)
-    call tsr%graphviz('right_split',get_node_label)
-    call traverse(tsl,'split L')
-    call traverse(tsr,'split R')
-    call traverse(sk,'split key')
-    print '("Black height of stl/str: ",l2,1x,i0," | ",l2,1x,i0)', &
-        tsl%isvalid(tree_test_basic_comp), tsl%blackheight(), tsr%isvalid(tree_test_basic_comp), tsr%blackheight()
-    print '("Allocated nodes counter ",i0)', allocation_counter
-
   end subroutine tree_test_playground
 
 

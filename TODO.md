@@ -13,15 +13,32 @@
 #####Set operations
 
 - [ ] test intersection/difference
-- [ ] operations are destructive, implement read-only variants?
-- [ ] build from array (or sorted array)
-- [ ] filter
-- [ ] duplicate
-- [ ] tidy-up code
+- [ ] operations are destructive, show an example how a copy
+      can be made easily
+- [ ] maybe overload operators + * - for union, intersection and differenve
 - [ ] encapsulation as tree/tree operations?
+- [ ] tidy-up code
 - [ ] join-based insert / delete ??
-- [ ] import/export of data to an array
+- [x] import/export of data to/from an array
+- [ ] filter
+- [ ] build from unsorted array (import)
+- [ ] import/export to file (directly or implement save/load of arrays in common_mod)
 
 A tree module with a linear allocator
 - [ ] basic implementation and speed comparisons
 
+## Naming methods suggestions
+
+- unlink_root, link_node
+- insert(value)
+- erase(value)
+- erase(iterator)
+- find(value)
+- begin() / end() --> iterators get_leftmost
+- size(), empty()
+- lower_bound(value) --> first element not less than value
+- upper_bound(value)
+- clear() -> remove all elements from the set
+- copy_tree, free_tree
+- isvalid()
+- read() / update() / 
