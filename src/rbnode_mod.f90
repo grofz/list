@@ -4,7 +4,8 @@ module rbnode_mod
   !  - (https://en.wikipedia.org/wiki/Red%E2%80%93black_tree)
   !  - (https://en.wikipedia.org/wiki/Join-based_tree_algorithms)
   !
-  use common_mod, only : DATA_KIND, mold, compare_fun, get_node_label_fun
+  use common_mod, only : DATA_KIND, mold, &
+      compare_fun, get_node_label_fun, select_fun
   use iso_fortran_env, only : int8
   implicit none
   private
@@ -65,7 +66,7 @@ module rbnode_mod
   public rbnode_insert, rbnode_delete, rbnode_freetree
   public rbnode_validate, rbnode_blackheight
   public rbnode_export
-  public join, split, union, intersection, difference
+  public join, split, union, intersection, difference, filter
 
   integer, public, save :: allocation_counter = 0
     !! temporary, just for mem.leakage debuging
@@ -1420,12 +1421,37 @@ allocation_counter=allocation_counter-1
   end function intersection
 
 
+  recursive function filter(T, sfun) result(Tselected)
+    type(rbnode_t), pointer, intent(in) :: T
+    procedure(select_fun) :: sfun
+    type(rbnode_t), pointer :: Tselected
+
+    type(rbnode_t), pointer :: L, m, R, T1, T2
+
+    Tselected => null()
+    if (.not. associated(T)) return
+
+    call unlink_root(L, m, R, T)
+
+    ! these two branches can run independently
+    T1 => filter(L, sfun)
+    T2 => filter(R, sfun)
+
+    if (sfun(rbnode_read(m))) then
+      Tselected => join(T1, m, T2)
+    else
+      Tselected => join(T1, T2)
+      call rbnode_free(m)
+    end if
+  end function filter
+
+
   recursive function difference(T1, T2, cfun) result(T12)
     type(rbnode_t), pointer, intent(inout) :: T1, T2
     procedure(compare_fun) :: cfun
     type(rbnode_t), pointer :: T12
 
-    type(rbnode_t), pointer :: L1, L2, L12, R1, R2, R12, m1, m2 
+    type(rbnode_t), pointer :: L1, L2, L12, R1, R2, R12, m1, m2
 
     if (.not. associated(T1)) then
       T12 => null()
@@ -1730,7 +1756,7 @@ allocation_counter=allocation_counter-1
   function print_node(node) result(str)
     type(rbnode_t), pointer :: node
     character(len=:), allocatable :: str
-    character(len=21) :: str0 
+    character(len=21) :: str0
     if (associated(node)) then
       write(str0,*) transfer(rbnode_read(node),1)
     else 

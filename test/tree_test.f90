@@ -19,7 +19,7 @@ contains
     integer, allocatable :: x1(:), x2(:), x12(:)
     type(rbbasetree_t) :: t1, t2, t12
     integer :: i, j, last
-    logical :: passed 
+    logical :: passed
     real :: time(2)
 
     print '("------------------")'
@@ -113,7 +113,8 @@ contains
     integer :: i, isplit
     logical :: passed, rejoined
     real :: time(2), xr
-    integer, parameter :: N=9000000
+    !integer, parameter :: N=9000000
+    integer, parameter :: N=900000
 
     print '("-----------------------")'
     print '("Running Join/Split test       size ",i0,"k")', (N)/1000
@@ -226,22 +227,30 @@ contains
 
 
   subroutine tree_test_playground()
-    type(rbbasetree_t) :: ta, tb, tab, k 
+    type(rbbasetree_t) :: ta, tb, tab, k
     integer, parameter, dimension(*) :: &
-      x1 = [20, 30, 40, 50, 60, 70, 80], &
+      x1 = [7, 12, 15, 20, 30, 41, 50, 61, 70, 81], &
       x2 = [4, 30, 35, 40]
     integer, parameter :: KEY=31, KSPLIT=31
-    integer :: i 
+    integer :: i
     logical :: passed
    !integer, allocatable :: starts(:)
    !integer(DATA_KIND), allocatable :: values(:)
-    
+
+ print '("Allocation counter ",i0)', allocation_counter
     passed = .true.
     call build_tree_via_insert(ta, x1, passed, to_validate=.true.)
     passed = passed .and. verify_nodes_order(ta, x1)
+    call display_tree_information(ta, 'original', passed)
     print *, 'test_order ', passed
 
-    stop
+    tb%root => filter(ta%root, select_some_integers)
+    call display_tree_information(tb, 'filtered', passed)
+    print *, 'passed =', passed
+ print '("Allocation counter ",i0)', allocation_counter
+
+
+    return
 
     ! BUILD FROM RAW DATA (if "x" are sorted)
     ta%root=>rbnode_t(int(x1,DATA_KIND), [(i,i=1,size(x1))])
@@ -484,6 +493,16 @@ contains
   end function compare_integers
 
 
+  logical function select_some_integers(a) result(selected)
+    !! Plug-in
+    integer(DATA_KIND), intent(in), dimension(:) :: a
+    integer :: aval
+
+    aval = transfer(a,aval)
+    selected = mod(aval,2)==0
+  end function select_some_integers
+
+
   ! ====================
   ! Misceleanous helpers
   ! ====================
@@ -517,7 +536,7 @@ contains
     n = size(yin)
     do i=1, n-1
       call random_number(xran)
-      ! j is in the range 
+      ! j is in the range
       ! * i==1: 1...n, i==2: 2..n, i==3: 3..n, i==n-1: n-1..n
       j = i-1 + int(xran*(n-i+1))+1
       ytmp = yout(j)

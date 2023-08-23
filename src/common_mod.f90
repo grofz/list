@@ -12,7 +12,7 @@ module common_mod
   integer(DATA_KIND), public :: mold(1)
   !* This variable can be used as _mold_ argument in `transfer` function
   !  to cast the user type variable to the type accepted in argument of
-  !  `dllnode_*` subroutines and functions
+  !  `dllnode_*` or `rbnode_*` subroutines and functions
 
   abstract interface
     function compare_fun(adat, bdat) result(ires)
@@ -30,12 +30,21 @@ module common_mod
     end function
 
     function get_node_label_fun(dat) result(label)
+      !* An user function to provide a string used as a node label. It is
+      !  used in `graohviz`, for example.
       import DATA_KIND
       implicit none
       integer(DATA_KIND), intent(in) :: dat(:)
       character(len=:), allocatable :: label
     end function get_node_label_fun
+
+    function select_fun(dat) result(is_selected)
+      import DATA_KIND
+      implicit none
+      integer(DATA_KIND), intent(in) :: dat(:)
+      logical :: is_selected
+    end function select_fun
   end interface
-  public compare_fun, get_node_label_fun
+  public compare_fun, get_node_label_fun, select_fun
 
 end module common_mod

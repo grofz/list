@@ -30,7 +30,7 @@ program test_dll
   call tree_test_union(copy_before_operation=.true.)
 
   !print '("============= PLAYGROUND ====================")'
-  !call tree_test_playground
+  call tree_test_playground
   stop
 
   call test1()
