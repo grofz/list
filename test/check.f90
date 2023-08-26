@@ -8,28 +8,35 @@ program test_dll
     end subroutine test2
   end interface
 
+  integer, parameter :: NSIZE = 1000000
   logical :: passed
   real :: time(2)
 
   call start_stopwatch('running insert test', time)
-  passed = run_insert_test(40000)
+  passed = run_insert_test(NSIZE)
   call end_stopwatch(time)
   print '("Passed ? ",L2)', passed
 
   call start_stopwatch('running delete test', time)
-  passed = run_delete_test(40000, inloop_validation=.false.)
+  passed = run_delete_test(NSIZE, inloop_validation=.false.)
   call end_stopwatch(time)
   print '("Passed ? ",L2)', passed
 
+  call start_stopwatch('running export/import/copy test', time)
+  passed = run_import_test(NSIZE)
+  call end_stopwatch(time)
+  print '("Passed ? ",L2)', passed
   print *
-  call tree_test_joinsplit()
 
+  call tree_test_joinsplit(NSIZE)
   print *
-  call tree_test_union(copy_before_operation=.false.)
+  call tree_test_union(NSIZE, copy_before_operation=.false.)
   print *
-  call tree_test_union(copy_before_operation=.true.)
+  call tree_test_union(NSIZE, copy_before_operation=.true.)
+  print *
 
-  !print '("============= PLAYGROUND ====================")'
+  stop
+  100 print '("============= PLAYGROUND ====================")'
   call tree_test_playground
   stop
 

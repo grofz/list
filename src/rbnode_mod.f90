@@ -139,34 +139,125 @@ allocation_counter=allocation_counter+1
   end function rbnode_new
 
 
-  subroutine rbnode_update(node, newdata, update_fail)
-    !! Update the data content of the node by newdata
-    !! Node must be isolated
+  subroutine rbnode_update(node, newdata, cfun, tree, was_updated)
+    !* Update the data content of the node by newdata
+    !
+    !  If node is part of a tree, also user compare function and the
+    !  root of the tree must be provided. Depending on the values of the
+    !  preceding and succeding node, the node value is either just updated, or,
+    !  if necessary, the node is removed and re-inserted to tree.
+    !
+    !  Subroutine will fail if required arguments are not provided or if
+    !  a node with the same value as "newdata" is already present in the
+    !  tree. Provide "was_updated" to be able to resolve the duplicate node
+    !  case in the calling procedure.
+    !
     type(rbnode_t), intent(in), pointer :: node
     integer(DATA_KIND), intent(in) :: newdata(:)
-    logical, intent(out), optional :: update_fail
+    procedure(compare_fun), optional :: cfun
+    type(rbbasetree_t), intent(inout), optional :: tree
+    logical, intent(out), optional :: was_updated
+      !! set to .false. if update would result into duplicit nodes in the tree
 
-    integer :: ierr
+    integer :: mode, ierr
+    integer, parameter :: ISOLATED=1, NOTMOVED=2, REINSERTED=3, DUPLICATE=4
+    type(rbnode_t), pointer :: succ, pred, found, updated
 
     if (.not. associated(node)) &
         error stop 'could not update data: node is null'
-    ! to be on the safe side, we do not allow modifying node in tree
-    if (associated(node%left) .or. associated(node%right) .or. associated(node%parent)) &
-        error stop 'update: works with isolated nodes only'
-! TODO - check successor/predecessor and allow update to proceed
-! only if the order is not affected by the change (future work?)
 
-    if (allocated(node%dat)) then
+    mode = ISOLATED
+    if (associated(node%left) .or. associated(node%right) .or. associated(node%parent)) &
+        mode = NOTMOVED
+
+    ! If node is not isolated, we check the neighbouring nodes to see, if the
+    ! updated node position within tree can remain unchanged
+    if (mode==ISOLATED) then
+      continue
+    else if (mode==NOTMOVED .and. present(cfun)) then
+      pred => rbnode_predecessor(node)
+      if (associated(pred)) then
+        select case(cfun(rbnode_read(pred), newdata))
+        case(-1) ! pred < new
+          continue
+        case(1)  ! pred > new
+          if (mode/=DUPLICATE) mode = REINSERTED
+        case(0)  ! pred == new
+          mode = DUPLICATE
+        case default
+          error stop 'update: user function returned an invalid flag'
+        end select
+      end if
+
+      succ => rbnode_successor(node)
+      if (associated(succ)) then
+        select case(cfun(newdata, rbnode_read(succ)))
+        case(-1) ! new < succ
+          continue
+        case(1)  ! new > succ
+          if (mode/=DUPLICATE) mode = REINSERTED
+        case(0)  ! new == succ
+          mode = DUPLICATE
+        case default
+          error stop 'update: user function returned an invalid flag'
+        end select
+      end if
+
+    else
+      error stop 'update: node is not isolated, not enough input args to verify'
+    end if
+
+    ! If remove / insert is required, we must verify that the updated node
+    ! is not already in tree
+    if (mode==REINSERTED) then
+      if (present(tree)) then
+        found => rbnode_find(tree%root, newdata, cfun)
+        if (associated(found)) then
+          mode = DUPLICATE
+        else
+          call rbnode_delete(tree, node, deleted_output=updated)
+        end if
+      else
+        error stop 'update: node must be moved, but root of tree not provided'
+      end if
+    end if
+
+    select case(mode)
+    case(ISOLATED, NOTMOVED)
+      updated => node
+    case(REINSERTED)
+      continue ! updated is already set via "rbnode_delete"
+    case(DUPLICATE)
+      ! node can not be updated
+      if (present(was_updated)) then
+        was_updated = .false.
+        return
+      else
+        error stop 'could not update because another node with same key is already in tree'
+      end if
+    case default
+      error stop 'update: unreachable'
+    end select
+
+    ! We can change the value
+    if (allocated(updated%dat)) then
       ierr = 0
-      if (size(newdata) /= size(node%dat)) deallocate(node%dat, stat=ierr)
+      if (size(newdata) /= size(updated%dat)) deallocate(updated%dat, stat=ierr)
       if (ierr /= 0) &
           error stop 'could not deallocate data during update'
     end if
     ierr = 0
-    if (.not. allocated(node%dat)) allocate(node%dat(size(newdata)), stat=ierr)
+    if (.not. allocated(updated%dat)) allocate(updated%dat(size(newdata)), stat=ierr)
     if (ierr /= 0) &
         error stop 'could not allocate data during update'
-    node%dat = newdata
+    updated%dat = newdata
+
+    ! reinsert the node back to tree if necessary
+    if (mode==REINSERTED) then
+      call rbnode_insert(tree, updated, cfun)
+    end if
+
+    if (present(was_updated)) was_updated=.true.
   end subroutine rbnode_update
 
 

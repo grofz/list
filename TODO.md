@@ -4,10 +4,10 @@
 ## Red-black tree
 
 - [ ] add difference and intersection tests
-- [ ] add import / export / copy test
+- [x] add import / export / copy test
 - [ ] implement build from unsorted array (import)
-- [ ] implement filter operation
-- [ ] implement update node operation
+- [x] implement filter operation
+- [x] implement update node operation
 
 - [ ] tide-up function names, keep consistency with list names
 - [ ] add a simple example of using the library

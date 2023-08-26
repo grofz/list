@@ -10,17 +10,20 @@ module tree_test_mod
 
 contains
 
-  subroutine tree_test_union(copy_before_operation)
-    !integer, parameter :: NMAX=15000000, N1=10000000, N2=4000000
-    !integer, parameter :: NMAX=100, N1=20, N2=35
-    integer, parameter :: NMAX=2000000, N1=800000, N2=350000
+  subroutine tree_test_union(nsize, copy_before_operation)
+    integer, intent(in) :: nsize
     logical, intent(in) :: copy_before_operation
 
+    integer :: nmax, n1, n2
     integer, allocatable :: x1(:), x2(:), x12(:)
     type(rbbasetree_t) :: t1, t2, t12
     integer :: i, j, last
     logical :: passed
     real :: time(2)
+
+    nmax = 2*nsize
+    n1 = 0.75*nsize
+    n2 = 0.25*nsize
 
     print '("------------------")'
     print '("Running Union test       total size ",i0,"k")', (N1+N2)/1000
@@ -28,8 +31,8 @@ contains
 
     ! Prepare input trees
     passed = .true.
-    x1 = get_array(NMAX)
-    x2 = get_array(NMAX)
+    x1 = get_array(nmax)
+    x2 = get_array(nmax)
     x1 = shuffle_array(x1)
     x2 = shuffle_array(x2)
     call start_stopwatch('inserting nodes',time)
@@ -42,10 +45,10 @@ contains
 
     ! Make independent union via arrays
     call start_stopwatch('making verification arrays',time)
-    call quicksort(x1(1:N1))
-    call quicksort(x2(1:N2))
-    allocate(x12(N1+N2))
-    call merge(x1(1:N1), x2(1:N2), x12)
+    call quicksort(x1(1:n1))
+    call quicksort(x2(1:n2))
+    allocate(x12(n1+n2))
+    call merge(x1(1:n1), x2(1:n2), x12)
 
     j = 0
     last = -huge(last)
@@ -59,7 +62,7 @@ contains
     call end_stopwatch(time)
 
     print '("N1 = ",i0,"  N2 = ",i0,"  N12 = ",i0,"  commons = ",i0)', &
-        N1, N2, j, N1+N2-j
+        n1, n2, j, n1+n2-j
 
     ! Union of two red-black trees
     if (copy_before_operation) then
@@ -106,33 +109,32 @@ contains
   end subroutine tree_test_union
 
 
-  subroutine tree_test_joinsplit()
+  subroutine tree_test_joinsplit(n)
+    integer, intent(in) :: n
     type(rbbasetree_t) :: t1, t2, t12, k
     type(rbnode_t), pointer :: cursor1, cursor2, cursork
     integer, allocatable :: x(:)
     integer :: i, isplit
     logical :: passed, rejoined
     real :: time(2), xr
-    !integer, parameter :: N=9000000
-    integer, parameter :: N=900000
 
     print '("-----------------------")'
-    print '("Running Join/Split test       size ",i0,"k")', (N)/1000
+    print '("Running Join/Split test       size ",i0,"k")', (n)/1000
     print '("-----------------------")'
 
     ! Prepare the tree
     passed = .true.
-    x = get_array(2*N)
+    x = get_array(2*n)
     x = shuffle_array(x)
     call start_stopwatch('inserting nodes',time)
-    call build_tree_via_insert(t12, x(1:N), passed, to_validate=.true.)
+    call build_tree_via_insert(t12, x(1:n), passed, to_validate=.true.)
     call end_stopwatch(time)
 
-    call quicksort(x(1:N))
+    call quicksort(x(1:n))
 
     ! Split the tree
     call random_number(xr)
-    isplit = int((2*N*xr)+1)
+    isplit = int((2*n*xr)+1)
     call start_stopwatch('spliting tree',time)
     call split(t1%root, k%root, t2%root, t12%root, transfer(isplit,mold), compare_integers)
     call end_stopwatch(time)
@@ -146,7 +148,7 @@ contains
     cursor1 => t1%leftmost()
     cursor2 => t2%leftmost()
     cursork => k%leftmost()
-    do i=1, N
+    do i=1, n
       if (x(i)<isplit) then
         if (associated(cursor1)) then
           passed = passed .and. transfer(rbnode_read(cursor1),1)==x(i)
@@ -221,9 +223,50 @@ contains
   end subroutine tree_test_joinsplit
 
   
-  subroutine tree_test_basic()
-    !! TODO test import/export and copy
-  end subroutine tree_test_basic
+  function run_import_test(nsize, seed) result(passed)
+    !! Test export / import / copy
+    integer, intent(in) :: nsize
+    integer, intent(in), optional :: seed
+    logical :: passed
+
+    type(rbbasetree_t) :: atree, btree, ctree
+    integer, allocatable :: y(:), starts(:)
+    integer(DATA_KIND), allocatable :: values(:)
+    integer :: nodes
+
+    ! make tree A
+    y = get_array(2*nsize)
+    y = shuffle_array(y, seed)
+    nodes = allocation_counter
+    passed = .true.
+    call build_tree_via_insert(atree, y(1:nsize), passed, to_validate=.true.)
+    call quicksort(y(1:nsize))
+
+    ! export tree A to an array and clear tree A
+    values = rbnode_export(atree%root, starts)
+    call rbnode_freetree(atree%root)
+    passed = passed .and. allocation_counter==nodes
+
+    ! import from an array to tree B
+    btree%root => rbnode_t(values, starts)
+    passed = passed .and. btree%isvalid(compare_integers)
+
+    ! verify tree B contains same elements as tree A
+    passed = passed .and. verify_nodes_order(btree, y(1:nsize))
+
+    ! make tree C a duplicate of tree B and clear tree B
+    ctree%root => rbnode_t(btree%root)
+    call rbnode_freetree(btree%root)
+    passed = passed .and. allocation_counter == nodes+nsize
+    passed = passed .and. ctree%isvalid(compare_integers)
+
+    ! verify tree C contains same elements as tree B
+    passed = passed .and. verify_nodes_order(ctree, y(1:nsize))
+
+    ! clear tree C
+    call rbnode_freetree(ctree%root)
+    passed = passed .and. allocation_counter==nodes
+  end function run_import_test
 
 
   subroutine tree_test_playground()
@@ -232,10 +275,9 @@ contains
       x1 = [7, 12, 15, 20, 30, 41, 50, 61, 70, 81], &
       x2 = [4, 30, 35, 40]
     integer, parameter :: KEY=31, KSPLIT=31
+    type(rbnode_t), pointer :: updated
     integer :: i
     logical :: passed
-   !integer, allocatable :: starts(:)
-   !integer(DATA_KIND), allocatable :: values(:)
 
  print '("Allocation counter ",i0)', allocation_counter
     passed = .true.
@@ -244,10 +286,29 @@ contains
     call display_tree_information(ta, 'original', passed)
     print *, 'test_order ', passed
 
-    tb%root => filter(ta%root, select_some_integers)
-    call display_tree_information(tb, 'filtered', passed)
-    print *, 'passed =', passed
+    ! test case 1 - isolated node
+    updated => rbnode_t(transfer(77,mold))
+    call rbnode_update(updated, transfer(42,mold))
+    tb%root => updated
+    call display_tree_information(tb, 'isolated_node', passed)
+    call rbnode_freetree(tb%root)
+
+    ! test case 2 - not moved node
+    updated => rbnode_find(ta%root, transfer(20,mold), compare_integers)
+    call rbnode_update(updated, transfer(22,mold), compare_integers)
+    call display_tree_information(ta, 'node_20_updated_22', passed)
+
+    ! test case 3 - node moved
+    updated => rbnode_find(ta%root, transfer(30,mold), compare_integers)
+    call rbnode_update(updated, transfer(10,mold), compare_integers, ta)
+    call display_tree_information(ta, 'node_30_updated_10', passed)
+
+
+    ! clean-up, any memory leaks?
+    call rbnode_freetree(ta%root)
  print '("Allocation counter ",i0)', allocation_counter
+    passed = passed .and. allocation_counter==0
+    print *, 'passed =', passed
 
 
     return
