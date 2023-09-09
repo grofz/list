@@ -212,11 +212,7 @@ allocation_counter=allocation_counter+1
     if (mode==REINSERTED) then
       if (present(tree)) then
         found => rbnode_find(tree%root, newdata, cfun)
-        if (associated(found)) then
-          mode = DUPLICATE
-        else
-          call rbnode_delete(tree, node, deleted_output=updated)
-        end if
+        if (associated(found)) mode = DUPLICATE
       else
         error stop 'update: node must be moved, but root of tree not provided'
       end if
@@ -226,7 +222,7 @@ allocation_counter=allocation_counter+1
     case(ISOLATED, NOTMOVED)
       updated => node
     case(REINSERTED)
-      continue ! updated is already set via "rbnode_delete"
+      call rbnode_delete(tree, node, deleted_output=updated)
     case(DUPLICATE)
       ! node can not be updated
       if (present(was_updated)) then
